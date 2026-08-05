@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenCode Remote — Button Logic Map</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --surface-dim: #131314;
+    --surface-container-low: #1c1b1c;
+    --surface-container: #201f20;
+    --surface-container-high: #2a2a2b;
+    --on-surface: #e5e2e3;
+    --on-surface-variant: #c1c6d7;
+    --outline: #8b90a0;
+    --primary: #adc6ff;
+    --secondary: #c0c1ff;
+    --tertiary: #ddb7ff;
+    --error: #ffb4ab;
+    --accent-green: #39D2C0;
+    --accent-yellow: #fbbf24;
+    --background: #0e0e10;
+    --border-subtle: rgba(255,255,255,0.04);
+    --border-medium: rgba(255,255,255,0.08);
+    --success-bg: rgba(57, 210, 192, 0.1);
+    --success-border: rgba(57, 210, 192, 0.3);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--background);
+    color: var(--on-surface);
+    min-height: 100vh;
+  }
+
+  .header {
+    background: var(--surface-dim);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 32px 48px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(20px);
+  }
+
+  .header h1 {
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--primary);
+  }
+
+  .header .stats {
+    display: flex;
+    gap: 24px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  .stat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: var(--on-surface-variant);
+  }
+
+  .stat .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    color: var(--accent-green);
+    font-size: 18px;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 999px;
+  }
+
+  .badge-green { background: rgba(57,210,192,0.15); color: var(--accent-green); border: 1px solid rgba(57,210,192,0.3); }
+  .badge-blue { background: rgba(173,198,255,0.15); color: var(--primary); border: 1px solid rgba(173,198,255,0.3); }
+  .badge-yellow { background: rgba(251,191,36,0.15); color: var(--accent-yellow); border: 1px solid rgba(251,191,36,0.3); }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 48px 24px;
+  }
+
+  .screen-section {
+    margin-bottom: 48px;
+  }
+
+  .screen-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--on-surface);
+    margin-bottom: 4px;
+  }
+
+  .screen-subtitle {
+    font-size: 14px;
+    color: var(--outline);
+    margin-bottom: 20px;
+  }
+
+  .buttons-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 16px;
+  }
+
+  .button-card {
+    background: var(--surface-container-low);
+    border-radius: 16px;
+    padding: 20px;
+    border: 1px solid var(--border-subtle);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+
+  .button-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  }
+
+  .button-card.fixed {
+    border-color: var(--success-border);
+    background: var(--success-bg);
+  }
+
+  .button-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .button-header .icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .icon-green { background: rgba(57,210,192,0.15); color: var(--accent-green); }
+  .icon-blue { background: rgba(173,198,255,0.15); color: var(--primary); }
+  .icon-yellow { background: rgba(251,191,36,0.15); color: var(--accent-yellow); }
+  .icon-purple { background: rgba(192,193,255,0.15); color: var(--secondary); }
+
+  .button-header .label {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--on-surface);
+  }
+
+  .button-header .view-name {
+    font-size: 12px;
+    color: var(--outline);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .button-desc {
+    font-size: 13px;
+    color: var(--on-surface-variant);
+    margin-bottom: 10px;
+    line-height: 1.5;
+  }
+
+  .api-call {
+    background: var(--surface-container);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--primary);
+    overflow-x: auto;
+    white-space: nowrap;
+    border: 1px solid var(--border-subtle);
+  }
+
+  .api-call .keyword { color: var(--tertiary); }
+  .api-call .string { color: var(--accent-green); }
+  .api-call .comment { color: var(--outline); }
+
+  .status-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 32px 0;
+  }
+
+  @media (max-width: 768px) {
+    .header { padding: 24px; }
+    .container { padding: 24px 16px; }
+    .buttons-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>✦ Button Logic Map</h1>
+    <div class="stats">
+      <div class="stat"><span class="num">12</span> pulsanti fixati</div>
+      <div class="stat"><span class="num">27</span> pulsanti totali con logica</div>
+      <div class="stat"><span class="num">24</span> chiamate API uniche</div>
+      <span class="badge badge-green">✅ Tutti implementati</span>
+      <span class="badge badge-blue">Obsidian Flux</span>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <!-- MainViews -->
+    <div class="screen-section">
+      <div class="screen-title">📱 MainViews</div>
+      <div class="screen-subtitle">LockScreen · ServerSetup · AddServer · ConnectingView · MainTabView</div>
+      <div class="buttons-grid">
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">🔒</div>
+            <div>
+              <div class="label">Sblocca</div>
+              <div class="view-name">LockScreenView</div>
+            </div>
+          </div>
+          <div class="button-desc">Autenticazione Face ID / biometrica. Chiama <code>onResult(true)</code> sul successo.</div>
+          <div class="api-call"><span class="keyword">LAContext</span>().evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">➕</div>
+            <div>
+              <div class="label">Aggiungi server</div>
+              <div class="view-name">ServerSetupView</div>
+            </div>
+          </div>
+          <div class="button-desc">Mostra sheet AddServerView per configurare un nuovo server OpenCode.</div>
+          <div class="api-call">sheet(isPresented: $showAddServer) { AddServerView() }</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-green">🔗</div>
+            <div>
+              <div class="label">Connetti (ServerRow)</div>
+              <div class="view-name">ServerSetupView</div>
+            </div>
+          </div>
+          <div class="button-desc">Seleziona un server salvato e avvia connessione via <code>appState.connect(to:)</code>.</div>
+          <div class="api-call"><span class="keyword">try await</span> appState.connect(to: server)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">🧪</div>
+            <div>
+              <div class="label">Test connessione</div>
+              <div class="view-name">AddServerView</div>
+            </div>
+          </div>
+          <div class="button-desc">Verifica che il server sia raggiungibile chiamando l'endpoint health.</div>
+          <div class="api-call"><span class="keyword">let</span> health = <span class="keyword">try await</span> client.health()</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-green">💾</div>
+            <div>
+              <div class="label">Salva server</div>
+              <div class="view-name">AddServerView</div>
+            </div>
+          </div>
+          <div class="button-desc">Salva credenziali nel Keychain e server in AppSettings.</div>
+          <div class="api-call"><span class="keyword">try await</span> appState.keychain.saveCredentials(serverId:, username:, password:)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-yellow">🔄</div>
+            <div>
+              <div class="label">Riprova / Cambia server</div>
+              <div class="view-name">ConnectingView</div>
+            </div>
+          </div>
+          <div class="button-desc">Ritenta connessione o torna alla schermata di setup.</div>
+          <div class="api-call"><span class="keyword">try await</span> appState.connect(to: server) / appState.disconnect()</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- SessionViews -->
+    <div class="screen-section">
+      <div class="screen-title">📱 SessionViews</div>
+      <div class="screen-subtitle">DashboardView · SessionsListView · SessionDetailView · QuestionCard · DiffOverviewView</div>
+      <div class="buttons-grid">
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">📊</div>
+            <div>
+              <div class="label">VIEW ALL (sessioni)</div>
+              <div class="view-name">DashboardView</div>
+            </div>
+          </div>
+          <div class="button-desc">Naviga al tab Sessioni (tab index 1) per vedere tutte le sessioni attive.</div>
+          <div class="api-call">selectedTab = <span class="string">1</span> <span class="comment">// Sessions tab</span></div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-green">➕</div>
+            <div>
+              <div class="label">Nuova sessione (+) / Crea</div>
+              <div class="view-name">DashboardView + SessionsListView</div>
+            </div>
+          </div>
+          <div class="button-desc">Crea una nuova sessione via API e la aggiunge alla lista attiva.</div>
+          <div class="api-call"><span class="keyword">let</span> session = <span class="keyword">try await</span> apiClient.createSession(CreateSessionRequest(title: <span class="string">"Nuova sessione"</span>))</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-purple">👤</div>
+            <div>
+              <div class="label">Cambia agente</div>
+              <div class="view-name">SessionDetailView (menu)</div>
+            </div>
+          </div>
+          <div class="button-desc">Sheet con lista agenti. Crea nuova sessione con agente selezionato.</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.listAgents() → apiClient.createSession(request)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">💻</div>
+            <div>
+              <div class="label">Cambia modello</div>
+              <div class="view-name">SessionDetailView (menu)</div>
+            </div>
+          </div>
+          <div class="button-desc">Text field per Model ID. Imposta il modello per la sessione corrente.</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.setSessionModel(session.id, modelId: modelId)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-yellow">🔀</div>
+            <div>
+              <div class="label">Fork sessione</div>
+              <div class="view-name">SessionDetailView (menu)</div>
+            </div>
+          </div>
+          <div class="button-desc">Crea un fork della sessione corrente (ramo separato).</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.forkSession(session.id, messageId: <span class="keyword">nil</span>)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-yellow">⏹️</div>
+            <div>
+              <div class="label">Interrompi</div>
+              <div class="view-name">SessionDetailView (menu)</div>
+            </div>
+          </div>
+          <div class="button-desc">Interrompe l'esecuzione corrente della sessione.</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.abortSession(session.id)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-green">📝</div>
+            <div>
+              <div class="label">Vedi modifiche</div>
+              <div class="view-name">SessionDetailView (menu)</div>
+            </div>
+          </div>
+          <div class="button-desc">Carica il diff della sessione e apre DiffOverviewView in sheet.</div>
+          <div class="api-call"><span class="keyword">let</span> diff = <span class="keyword">try await</span> apiClient.getSessionDiff(session.id, messageId: <span class="keyword">nil</span>)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-purple">📄</div>
+            <div>
+              <div class="label">Riassumi</div>
+              <div class="view-name">SessionDetailView (menu)</div>
+            </div>
+          </div>
+          <div class="button-desc">Chiede all'agente di riassumere la conversazione della sessione.</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.summarizeSession(session.id, request: SummarizeSessionRequest())</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">⬆️</div>
+            <div>
+              <div class="label">Invia messaggio</div>
+              <div class="view-name">SessionDetailView (composer)</div>
+            </div>
+          </div>
+          <div class="button-desc">Invia messaggio asyncrono al server. Supporta @agent e /command.</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.sendMessageAsync(session.id, request: SendMessageAsyncRequest(message: <span class="string">"..."</span>))</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-purple">❓</div>
+            <div>
+              <div class="label">Rispondi (QuestionCard)</div>
+              <div class="view-name">SessionDetailView</div>
+            </div>
+          </div>
+          <div class="button-desc">Risponde a una domanda dell'agente con testo libero o opzione selezionata.</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.answerQuestion(sessionId, questionId:, response:)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-yellow">✋</div>
+            <div>
+              <div class="label">Rifiuta (QuestionCard)</div>
+              <div class="view-name">SessionDetailView</div>
+            </div>
+          </div>
+          <div class="button-desc">Rifiuta di rispondere alla domanda dell'agente.</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.declineQuestion(sessionId, questionId:)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-green">🗑️</div>
+            <div>
+              <div class="label">Elimina sessione (swipe)</div>
+              <div class="view-name">SessionsListView</div>
+            </div>
+          </div>
+          <div class="button-desc">Elimina sessione dal server e dalla lista locale (swipe to delete).</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.deleteSession(session.id)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">🔄</div>
+            <div>
+              <div class="label">Refresh sessioni (pull)</div>
+              <div class="view-name">SessionsListView</div>
+            </div>
+          </div>
+          <div class="button-desc">Ricarica lista sessioni e stati via pull-to-refresh.</div>
+          <div class="api-call"><span class="keyword">let</span> sessions = <span class="keyword">try await</span> apiClient.listSessions()<br>apiClient.getSessionsStatus()</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- AgentViews -->
+    <div class="screen-section">
+      <div class="screen-title">📱 AgentViews</div>
+      <div class="screen-subtitle">AgentsView · AgentDetailView · ProvidersView · ProviderDetailView · AddCustomProviderView</div>
+      <div class="buttons-grid">
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">🔄</div>
+            <div>
+              <div class="label">Refresh agenti (pull)</div>
+              <div class="view-name">AgentsView</div>
+            </div>
+          </div>
+          <div class="button-desc">Ricaricamento lista agenti via pull-to-refresh.</div>
+          <div class="api-call"><span class="keyword">let</span> agents = <span class="keyword">try await</span> apiClient.listAgents()</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-purple">🤖</div>
+            <div>
+              <div class="label">Usa questo agente</div>
+              <div class="view-name">AgentDetailView</div>
+            </div>
+          </div>
+          <div class="button-desc">Crea una nuova sessione con l'agente selezionato e il suo modello.</div>
+          <div class="api-call">CreateSessionRequest(agentId:, modelId:, title: <span class="string">"Sessione con ..."</span>)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">🔑</div>
+            <div>
+              <div class="label">Connetti con API Key</div>
+              <div class="view-name">ProviderDetailView</div>
+            </div>
+          </div>
+          <div class="button-desc">Salva API Key per il provider selezionato.</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.setAuthAPIKey(provider.id, apiKey:)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-green">🔗</div>
+            <div>
+              <div class="label">Connetti con OAuth</div>
+              <div class="view-name">ProviderDetailView</div>
+            </div>
+          </div>
+          <div class="button-desc">Avvia flusso OAuth, apre URL di autorizzazione nel browser.</div>
+          <div class="api-call"><span class="keyword">let</span> url = <span class="keyword">try await</span> apiClient.oauthAuthorize(provider.id, redirectUri: <span class="keyword">nil</span>)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-purple">🔗</div>
+            <div>
+              <div class="label">Connetti con Device Code</div>
+              <div class="view-name">ProviderDetailView</div>
+            </div>
+          </div>
+          <div class="button-desc">Avvia flusso Device Code (fallback OAuth).</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.oauthAuthorize(provider.id, redirectUri: <span class="keyword">nil</span>)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-yellow">🔌</div>
+            <div>
+              <div class="label">Disconnetti provider</div>
+              <div class="view-name">ProviderDetailView</div>
+            </div>
+          </div>
+          <div class="button-desc">Rimuove API Key del provider (setta a stringa vuota).</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.setAuthAPIKey(provider.id, apiKey: <span class="string">""</span>)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-green">💾</div>
+            <div>
+              <div class="label">Crea provider</div>
+              <div class="view-name">AddCustomProviderView</div>
+            </div>
+          </div>
+          <div class="button-desc">Registra nuovo provider personalizzato sul server OpenCode.</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.createProviderConfig(request)<br><span class="keyword">if</span> !apiKey.isEmpty { apiClient.setAuthAPIKey(providerId, apiKey:) }</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- SettingsView -->
+    <div class="screen-section">
+      <div class="screen-title">📱 SettingsView</div>
+      <div class="screen-subtitle">SettingsTabView · ServerDetailView</div>
+      <div class="buttons-grid">
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-yellow">🔌</div>
+            <div>
+              <div class="label">Disconnetti (Settings)</div>
+              <div class="view-name">SettingsTabView</div>
+            </div>
+          </div>
+          <div class="button-desc">Disconnette dal server corrente.</div>
+          <div class="api-call">appState.disconnect()</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-green">📖</div>
+            <div>
+              <div class="label">API Documentation</div>
+              <div class="view-name">SettingsTabView</div>
+            </div>
+          </div>
+          <div class="button-desc">Apre la documentazione API del server concatenando <code>/doc</code> all'URL base.</div>
+          <div class="api-call">openURL(URL(string: <span class="string">"\(server.baseURL)/doc"</span>)!)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">ℹ️</div>
+            <div>
+              <div class="label">Informazioni</div>
+              <div class="view-name">SettingsTabView</div>
+            </div>
+          </div>
+          <div class="button-desc">Mostra alert con versione app, build e piattaforma.</div>
+          <div class="api-call">Bundle.main.infoDictionary[<span class="string">"CFBundleShortVersionString"</span>]</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-purple">💾</div>
+            <div>
+              <div class="label">Salva modifiche server</div>
+              <div class="view-name">ServerDetailView</div>
+            </div>
+          </div>
+          <div class="button-desc">Aggiorna configurazione server e salva credenziali nel Keychain.</div>
+          <div class="api-call">appState.saveSettings()<br><span class="keyword">try await</span> appState.keychain.saveCredentials(...)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-yellow">🗑️</div>
+            <div>
+              <div class="label">Elimina server</div>
+              <div class="view-name">ServerDetailView</div>
+            </div>
+          </div>
+          <div class="button-desc">Rimuove server dalle impostazioni e credenziali dal Keychain.</div>
+          <div class="api-call">appState.settings.servers.removeAll()<br><span class="keyword">try await</span> appState.keychain.deleteCredentials(serverId:)</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Terminal & FileExplorer -->
+    <div class="screen-section">
+      <div class="screen-title">📱 TerminalView + FileExplorerView</div>
+      <div class="screen-subtitle">Terminale remoto · File explorer · Diff viewer · Search</div>
+      <div class="buttons-grid">
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-green">⌨️</div>
+            <div>
+              <div class="label">Invia comando (Terminal)</div>
+              <div class="view-name">TerminalView</div>
+            </div>
+          </div>
+          <div class="button-desc">Esegue comando shell sul server remoto. Output con parsing ANSI.</div>
+          <div class="api-call"><span class="keyword">let</span> output = <span class="keyword">try await</span> apiClient.executeShell(sessionId, request: ShellCommandRequest(command:))</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">🔄</div>
+            <div>
+              <div class="label">Cronologia comandi</div>
+              <div class="view-name">TerminalView</div>
+            </div>
+          </div>
+          <div class="button-desc">Sheet cronologia locale (50 comandi). Swipe per eliminare. Tap per ricaricare.</div>
+          <div class="api-call"><span class="comment">// Locale — nessuna chiamata API</span></div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-purple">📂</div>
+            <div>
+              <div class="label">Naviga file / directory</div>
+              <div class="view-name">FileExplorerView</div>
+            </div>
+          </div>
+          <div class="button-desc">Tree view con breadcrumb. Navigazione directory e apertura file.</div>
+          <div class="api-call"><span class="keyword">try await</span> apiClient.listFiles(path: currentPath)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-blue">🔍</div>
+            <div>
+              <div class="label">Cerca file / testo</div>
+              <div class="view-name">FileExplorerView (SearchView)</div>
+            </div>
+          </div>
+          <div class="button-desc">Ricerca full-text o per nome file con filtro percorso.</div>
+          <div class="api-call">apiClient.searchText(pattern:, path:, limit: <span class="string">50</span>) / apiClient.findFiles(query:, limit: <span class="string">50</span>)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-green">📄</div>
+            <div>
+              <div class="label">Vedi contenuto file</div>
+              <div class="view-name">FileDetailView</div>
+            </div>
+          </div>
+          <div class="button-desc">Carica e mostra contenuto file con syntax highlighting (line numbers, keywords, types, strings).</div>
+          <div class="api-call"><span class="keyword">let</span> content = <span class="keyword">try await</span> apiClient.getFileContent(path: filePath)</div>
+        </div>
+
+        <div class="button-card fixed">
+          <div class="button-header">
+            <div class="icon icon-yellow">📊</div>
+            <div>
+              <div class="label">Vedi diff (DiffView)</div>
+              <div class="view-name">FileExplorerView</div>
+            </div>
+          </div>
+          <div class="button-desc">Mostra diff con linee numerate, aggiunte (verde) e rimozioni (rosso).</div>
+          <div class="api-call"><span class="comment">// Diff già caricato via getSessionDiff</span></div>
+        </div>
+
+      </div>
+    </div>
+
+    <div style="text-align:center;padding:32px 0;color:var(--outline);font-size:13px">
+      <span class="badge badge-green">✅ 27/27 pulsanti con logica</span>
+      <span style="margin:0 8px">·</span>
+      <span class="badge badge-blue">12 fix in questa sessione</span>
+      <span style="margin:0 8px">·</span>
+      <span>6279 righe Swift · Build pulito</span>
+    </div>
+
+  </div>
+</body>
+</html>

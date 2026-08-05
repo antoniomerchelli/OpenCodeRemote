@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<title>OpenCode Remote - Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-dim": "#131314",
+                    "on-surface-variant": "#c1c6d7",
+                    "surface-container-low": "#1c1b1c",
+                    "on-tertiary": "#490080",
+                    "on-tertiary-fixed": "#2c0051",
+                    "secondary-fixed": "#e1e0ff",
+                    "primary-fixed": "#d8e2ff",
+                    "inverse-primary": "#005bc1",
+                    "on-secondary-fixed-variant": "#2f2ebe",
+                    "on-tertiary-container": "#400071",
+                    "on-secondary-fixed": "#07006c",
+                    "secondary-container": "#3131c0",
+                    "on-error": "#690005",
+                    "surface-variant": "#353436",
+                    "error": "#ffb4ab",
+                    "tertiary": "#ddb7ff",
+                    "outline": "#8b90a0",
+                    "on-tertiary-fixed-variant": "#6900b3",
+                    "surface-container": "#201f20",
+                    "primary-container": "#4b8eff",
+                    "tertiary-fixed-dim": "#ddb7ff",
+                    "on-background": "#e5e2e3",
+                    "on-surface": "#e5e2e3",
+                    "surface-bright": "#39393a",
+                    "tertiary-fixed": "#f0dbff",
+                    "inverse-on-surface": "#313031",
+                    "on-primary-container": "#00285c",
+                    "surface-container-high": "#2a2a2b",
+                    "outline-variant": "#414755",
+                    "inverse-surface": "#e5e2e3",
+                    "on-error-container": "#ffdad6",
+                    "on-primary-fixed": "#001a41",
+                    "on-primary": "#002e69",
+                    "primary-fixed-dim": "#adc6ff",
+                    "surface-container-highest": "#353436",
+                    "surface-tint": "#adc6ff",
+                    "on-secondary": "#1000a9",
+                    "tertiary-container": "#b76dff",
+                    "on-primary-fixed-variant": "#004493",
+                    "surface": "#131314",
+                    "on-secondary-container": "#b0b2ff",
+                    "secondary": "#c0c1ff",
+                    "surface-container-lowest": "#0e0e0f",
+                    "secondary-fixed-dim": "#c0c1ff",
+                    "primary": "#adc6ff",
+                    "background": "#131314",
+                    "error-container": "#93000a"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.5rem",
+                    "lg": "1rem",
+                    "xl": "1.5rem",
+                    "2xl": "2rem",
+                    "3xl": "3rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "section-gap": "64px",
+                    "container-padding": "32px",
+                    "base": "8px",
+                    "gutter": "24px"
+            },
+            "fontFamily": {
+                    "body-md": ["Geist"],
+                    "headline-lg-mobile": ["Geist"],
+                    "label-sm": ["JetBrains Mono"],
+                    "headline-lg": ["Geist"],
+                    "display-lg": ["Geist"]
+            },
+            "fontSize": {
+                    "body-md": ["16px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "400"}],
+                    "headline-lg-mobile": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                    "label-sm": ["12px", {"lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                    "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                    "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.04em", "fontWeight": "600"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: #0E0E10;
+            color: #E5E2E3;
+            font-family: 'Geist', sans-serif;
+        }
+        .obsidian-glass {
+            background: rgba(28, 27, 28, 0.4);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .session-card {
+            background: #1C1B1C;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .session-card:hover {
+            background: #242324;
+            transform: translateY(-2px);
+        }
+        .thinking-glow {
+            box-shadow: 0 0 32px -8px rgba(173, 198, 255, 0.15);
+            border: 1px solid rgba(173, 198, 255, 0.3);
+        }
+        .pulse-icon {
+            animation: pulse 2.5s infinite ease-in-out;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 0.4; scale: 0.98; }
+            50% { opacity: 1; scale: 1.02; }
+        }
+        .animate-spin-slow {
+            animation: spin 6s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col pt-16 pb-24 md:pb-0 md:pl-80">
+<!-- NavigationDrawer (Centered Layout Focus) -->
+<aside class="hidden md:flex flex-col fixed inset-y-0 left-0 z-[60] bg-surface-container-lowest h-full w-80 border-r border-white/5">
+<div class="p-8 flex flex-col gap-6">
+<div class="flex flex-col items-center text-center gap-4">
+<img alt="Developer Avatar" class="w-20 h-20 rounded-3xl object-cover border-2 border-outline-variant shadow-xl" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnFVVYfxuoQiwMsNtixBZUTNbnHFRv2wLSh8POv6nvNyTMmleEFS_rdApWkoeRSyXbBkszpcauOWrpnKHOeVoGa7jTEc99_LxQIGqrBTfuYZBzmNSW6Nqvh132cuU8iGgx1aypb1187o6Zs1h5qA4UHIoPkVXXugcO24jNXrecs5UODzIvHy5JTOoxjQcBmitSL4sSbWBu6M8o5XKDmIEF7CO5ikHpIIHuUebf-BIcQQiBQ-gIraKR"/>
+<div>
+<h2 class="font-headline-lg text-headline-lg-mobile text-primary tracking-tight">Remote Admin</h2>
+<p class="font-label-sm text-label-sm text-on-surface-variant opacity-60">10.0.0.42</p>
+</div>
+</div>
+<div class="inline-flex items-center justify-center px-3 py-1 rounded-full bg-surface-variant/50 border border-white/5 font-label-sm text-label-sm text-on-surface mx-auto">
+            V2.4.0-stable
+        </div>
+</div>
+<nav class="flex-1 overflow-y-auto py-4 px-6 flex flex-col gap-3">
+<a class="flex items-center gap-4 px-5 py-4 rounded-2xl bg-primary text-on-primary shadow-lg shadow-primary/10 transition-all" href="#">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">dns</span>
+<span class="font-body-md text-body-md font-semibold">Server Health</span>
+</a>
+<a class="flex items-center gap-4 px-5 py-4 rounded-2xl text-on-surface-variant hover:bg-surface-container transition-all" href="#">
+<span class="material-symbols-outlined text-[20px]">vpn_key</span>
+<span class="font-body-md text-body-md">SSH Keys</span>
+</a>
+<a class="flex items-center gap-4 px-5 py-4 rounded-2xl text-on-surface-variant hover:bg-surface-container transition-all" href="#">
+<span class="material-symbols-outlined text-[20px]">monitoring</span>
+<span class="font-body-md text-body-md">API Usage</span>
+</a>
+<a class="flex items-center gap-4 px-5 py-4 rounded-2xl text-on-surface-variant hover:bg-surface-container transition-all" href="#">
+<span class="material-symbols-outlined text-[20px]">menu_book</span>
+<span class="font-body-md text-body-md">Documentation</span>
+</a>
+</nav>
+</aside>
+<!-- TopAppBar (Floating Center Feel) -->
+<header class="fixed top-0 right-0 left-0 md:left-80 z-50 px-4 pt-4">
+<div class="max-w-5xl mx-auto h-14 obsidian-glass rounded-2xl px-6 flex justify-between items-center">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-[20px]">terminal</span>
+<span class="font-label-sm text-label-sm font-bold text-primary tracking-widest uppercase">OpenCode</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="hidden sm:flex items-center gap-2 font-label-sm text-label-sm text-on-surface-variant bg-surface-container-low px-4 py-1.5 rounded-full border border-white/5">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
+                macstudio.local
+            </div>
+<img alt="user_profile" class="w-8 h-8 rounded-xl object-cover border border-outline-variant" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCBWI7xfdcnNIbtq8A5MxhADGiQLKkyfq2SCeM2Xc9BhIQXJQi5j7IrWCip1o-5GdIIUxTnBJrpZtiG0P_HvyQyOYNvE8vDd4741Nnd2RbUIX8qV2j_dDSzggekO6lGGIpISaHOLSzW7aDLjbvSshX4dKUnTvYnCSUL--wFdqOYh25lppB32r7uuhyT9e06BoJdj8MFsxFQyWIkpdEz3gwQrjeknEXiSIlsFt88RfLhVHRdLHNTVEgf"/>
+</div>
+</div>
+</header>
+<main class="flex-1 w-full max-w-5xl mx-auto px-6 py-8 md:py-12 flex flex-col gap-8">
+<!-- Mobile Host Status (Centered) -->
+<div class="md:hidden flex flex-col items-center gap-2 p-6 obsidian-glass rounded-3xl text-center">
+<div class="w-12 h-12 rounded-2xl bg-secondary-container/20 flex items-center justify-center mb-2">
+<span class="material-symbols-outlined text-primary text-[24px]">dns</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg-mobile text-primary">macstudio.local</h1>
+<div class="flex items-center gap-2 text-emerald-400 font-label-sm">
+<span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            CONNECTED
+        </div>
+</div>
+<!-- Notifications Section (Rounded & Centered) -->
+<div class="bg-error-container/10 border border-error/20 rounded-3xl p-6 md:p-8 flex flex-col sm:flex-row items-center text-center sm:text-left gap-6">
+<div class="w-16 h-16 rounded-2xl bg-error/20 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-error text-[32px]" style="font-variation-settings: 'FILL' 1;">rule</span>
+</div>
+<div class="flex-1">
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-on-error-container">3 Pending Permissions</h3>
+<p class="font-body-md text-body-md text-on-surface-variant/80 mt-1">Manual review required for system-level operations.</p>
+</div>
+<button class="w-full sm:w-auto px-10 py-4 bg-error text-on-error font-body-md font-bold rounded-2xl shadow-lg shadow-error/10 hover:brightness-110 active:scale-[0.98] transition-all">
+            Review Now
+        </button>
+</div>
+<!-- Primary Actions (Balanced Grid) -->
+<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+<button class="flex items-center justify-center gap-3 bg-primary text-on-primary font-headline-lg-mobile py-5 px-8 rounded-3xl shadow-xl shadow-primary/5 hover:brightness-105 transition-all">
+<span class="material-symbols-outlined text-[24px]" style="font-variation-settings: 'FILL' 1;">add_circle</span>
+            New Session
+        </button>
+<button class="flex items-center justify-center gap-3 bg-surface-container-high text-primary font-headline-lg-mobile py-5 px-8 rounded-3xl border border-white/5 hover:bg-surface-variant transition-all">
+<span class="material-symbols-outlined text-[24px]">terminal</span>
+            Open Terminal
+        </button>
+</div>
+<!-- Active Sessions Section -->
+<section>
+<div class="flex items-center justify-between mb-8">
+<h2 class="font-headline-lg text-headline-lg text-primary flex items-center gap-4">
+<span class="material-symbols-outlined text-primary text-[28px]">token</span>
+                Active Sessions
+            </h2>
+<button class="text-primary/60 font-label-sm hover:text-primary transition-colors">VIEW ALL</button>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<!-- Thinking Card -->
+<div class="session-card rounded-[2.5rem] p-8 flex flex-col gap-6 thinking-glow">
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-primary">Refactor Auth</h3>
+<p class="font-label-sm text-label-sm text-outline uppercase mt-1">ID: OCR-4A9</p>
+</div>
+<div class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/10 border border-primary/20">
+<span class="material-symbols-outlined text-[16px] text-primary pulse-icon">psychology</span>
+<span class="font-label-sm text-label-sm text-primary font-bold">THINKING</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest/50 p-6 rounded-3xl border border-white/5 italic text-on-surface-variant/80 font-body-md text-center">
+                    "Optimizing token validation logic for higher throughput..."
+                </div>
+<div class="flex justify-between items-center font-label-sm text-label-sm text-outline px-2">
+<span class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-primary"></span> SYNCED</span>
+<span>JUST NOW</span>
+</div>
+</div>
+<!-- Executing Card -->
+<div class="session-card rounded-[2.5rem] p-8 flex flex-col gap-6">
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-primary">E2E Testing</h3>
+<p class="font-label-sm text-label-sm text-outline uppercase mt-1">ID: OCR-7B2</p>
+</div>
+<div class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-secondary-container/20 border border-secondary/30">
+<span class="material-symbols-outlined text-[16px] text-secondary animate-spin-slow">settings</span>
+<span class="font-label-sm text-label-sm text-secondary font-bold">EXECUTING</span>
+</div>
+</div>
+<div class="flex flex-col items-center gap-4 py-4">
+<div class="w-12 h-12 rounded-2xl bg-secondary-container/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary">terminal</span>
+</div>
+<p class="font-body-md text-on-surface-variant">Running cypress integration suite</p>
+</div>
+<div class="flex justify-between items-center font-label-sm text-label-sm text-outline px-2">
+<span>STATUS: ACTIVE</span>
+<span>2M AGO</span>
+</div>
+</div>
+<!-- Blocked Card -->
+<div class="session-card rounded-[2.5rem] p-8 flex flex-col gap-6 border-l-[6px] border-l-amber-500/50">
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-primary">Prod Deploy</h3>
+<p class="font-label-sm text-label-sm text-outline uppercase mt-1">ID: OCR-9X1</p>
+</div>
+<div class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20">
+<span class="material-symbols-outlined text-[16px] text-amber-500">front_hand</span>
+<span class="font-label-sm text-label-sm text-amber-500 font-bold">BLOCKED</span>
+</div>
+</div>
+<div class="bg-amber-500/5 border border-amber-500/10 p-5 rounded-3xl flex flex-col items-center gap-3 text-center">
+<p class="font-body-md text-on-surface-variant">Approval required for: <code class="text-amber-400">rm -rf ./temp</code></p>
+<button class="text-amber-500 font-bold hover:underline">REVIEW ACTION</button>
+</div>
+<div class="flex justify-between items-center font-label-sm text-label-sm text-outline px-2">
+<span>SECURITY RISK: MED</span>
+<span>15M AGO</span>
+</div>
+</div>
+<!-- Idle Card -->
+<div class="session-card rounded-[2.5rem] p-8 flex flex-col gap-6 opacity-60 grayscale hover:grayscale-0 hover:opacity-100">
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-headline-lg-mobile text-headline-lg-mobile text-primary">Cleanup</h3>
+<p class="font-label-sm text-label-sm text-outline uppercase mt-1">ID: OCR-2C5</p>
+</div>
+<div class="flex items-center gap-2 px-4 py-1.5 rounded-full bg-surface-container-high border border-outline-variant">
+<span class="material-symbols-outlined text-[16px] text-outline">check_circle</span>
+<span class="font-label-sm text-label-sm text-outline font-bold">IDLE</span>
+</div>
+</div>
+<div class="flex flex-col items-center gap-2 py-6">
+<p class="font-body-md text-on-surface-variant/50">Task completed successfully</p>
+</div>
+<div class="flex justify-between items-center font-label-sm text-label-sm text-outline px-2">
+<span>SUCCESS RATE: 100%</span>
+<span>1H AGO</span>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- BottomNavBar (iOS-style Centered Icons) -->
+<nav class="md:hidden fixed bottom-6 left-6 right-6 z-50 obsidian-glass rounded-3xl h-20 flex justify-around items-center px-6">
+<a class="flex flex-col items-center justify-center text-primary transition-all" href="#">
+<div class="w-12 h-8 flex items-center justify-center rounded-2xl bg-primary/10 mb-1">
+<span class="material-symbols-outlined text-[24px]" style="font-variation-settings: 'FILL' 1;">grid_view</span>
+</div>
+<span class="font-label-sm text-[10px] uppercase tracking-tighter font-bold">Dash</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 transition-all" href="#">
+<div class="w-12 h-8 flex items-center justify-center rounded-2xl mb-1">
+<span class="material-symbols-outlined text-[24px]">token</span>
+</div>
+<span class="font-label-sm text-[10px] uppercase tracking-tighter">Sessions</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 transition-all relative" href="#">
+<div class="w-12 h-8 flex items-center justify-center rounded-2xl mb-1">
+<span class="material-symbols-outlined text-[24px]">verified_user</span>
+<span class="absolute top-0 right-2 w-2 h-2 rounded-full bg-error border-2 border-surface"></span>
+</div>
+<span class="font-label-sm text-[10px] uppercase tracking-tighter">Perms</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 transition-all" href="#">
+<div class="w-12 h-8 flex items-center justify-center rounded-2xl mb-1">
+<span class="material-symbols-outlined text-[24px]">settings</span>
+</div>
+<span class="font-label-sm text-[10px] uppercase tracking-tighter">Config</span>
+</a>
+</nav>
+</body></html>

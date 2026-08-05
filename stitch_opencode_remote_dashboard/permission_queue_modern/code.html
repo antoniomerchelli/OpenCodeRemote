@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Permission Queue - OpenCode Remote</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-dim": "#131314",
+                        "on-surface-variant": "#c1c6d7",
+                        "surface-container-low": "#1c1b1c",
+                        "on-tertiary": "#490080",
+                        "on-tertiary-fixed": "#2c0051",
+                        "secondary-fixed": "#e1e0ff",
+                        "primary-fixed": "#d8e2ff",
+                        "inverse-primary": "#005bc1",
+                        "on-secondary-fixed-variant": "#2f2ebe",
+                        "on-tertiary-container": "#400071",
+                        "on-secondary-fixed": "#07006c",
+                        "secondary-container": "#3131c0",
+                        "on-error": "#690005",
+                        "surface-variant": "#353436",
+                        "error": "#ffb4ab",
+                        "tertiary": "#ddb7ff",
+                        "outline": "#8b90a0",
+                        "on-tertiary-fixed-variant": "#6900b3",
+                        "surface-container": "#201f20",
+                        "primary-container": "#4b8eff",
+                        "tertiary-fixed-dim": "#ddb7ff",
+                        "on-background": "#e5e2e3",
+                        "on-surface": "#e5e2e3",
+                        "surface-bright": "#39393a",
+                        "tertiary-fixed": "#f0dbff",
+                        "inverse-on-surface": "#313031",
+                        "on-primary-container": "#00285c",
+                        "surface-container-high": "#2a2a2b",
+                        "outline-variant": "#414755",
+                        "inverse-surface": "#e5e2e3",
+                        "on-error-container": "#ffdad6",
+                        "on-primary-fixed": "#001a41",
+                        "on-primary": "#002e69",
+                        "primary-fixed-dim": "#adc6ff",
+                        "surface-container-highest": "#353436",
+                        "surface-tint": "#adc6ff",
+                        "on-secondary": "#1000a9",
+                        "tertiary-container": "#b76dff",
+                        "on-primary-fixed-variant": "#004493",
+                        "surface": "#131314",
+                        "on-secondary-container": "#b0b2ff",
+                        "secondary": "#c0c1ff",
+                        "surface-container-lowest": "#0e0e0f",
+                        "secondary-fixed-dim": "#c0c1ff",
+                        "primary": "#adc6ff",
+                        "background": "#131314",
+                        "error-container": "#93000a"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem",
+                        "xl": "1.5rem",
+                        "2xl": "2rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "section-gap": "64px",
+                        "container-padding": "32px",
+                        "base": "8px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["Geist", "Inter", "sans-serif"],
+                        "headline-lg": ["Geist", "Inter", "sans-serif"],
+                        "label-sm": ["JetBrains Mono", "monospace"],
+                        "code": ["JetBrains Mono", "monospace"]
+                    },
+                    "fontSize": {
+                        "body-md": ["16px", { "lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "400" }],
+                        "label-sm": ["12px", { "lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600" }]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        .material-symbols-outlined[style*="FILL' 1"] {
+            font-variation-settings: 'FILL' 1, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        body {
+            min-height: 100dvh;
+        }
+        .glass-panel {
+            background: rgba(32, 31, 32, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background flex flex-col font-body-md antialiased md:pl-80">
+<!-- Navigation Drawer (Desktop) -->
+<aside class="hidden md:flex flex-col fixed inset-y-0 left-0 z-[60] bg-surface-container-lowest h-full w-80 shadow-2xl transition-all duration-300 border-r border-white/5">
+<div class="flex-1 flex flex-col pt-8 px-6">
+<div class="flex items-center space-x-4 mb-10">
+<div class="h-12 w-12 rounded-full overflow-hidden border border-outline-variant">
+<img alt="Developer Avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA_JA3dWnGZ6npzO4z7yy5dAu_hhfQvI2Qrr5kqvLbaQ6FIc_qu7fS5wr6HRL38racl5AsJIn4E2AXnZF2U96HYDK8IrcFksW1bJQc44WihS8wbnNw6IQ5qRDiRafUaStooAMwlJjDQto6PVgCGt9ecP3vCbe8JLkhB9uNJ8kMhBEncyTcUCwKVcDmsvE8OmdQq3hnvH0XD8o3kvro44fNvkeOI9ZT1BK5eIItyB91ErOayulVJZzxA"/>
+</div>
+<div>
+<h2 class="font-bold text-primary">Remote Admin</h2>
+<p class="font-code text-sm text-on-surface-variant">10.0.0.42</p>
+</div>
+</div>
+<nav class="space-y-2 flex-1">
+<a class="flex items-center space-x-3 px-4 py-3 rounded-full text-on-surface-variant hover:bg-surface-variant transition-colors" href="#">
+<span class="material-symbols-outlined">dns</span>
+<span>Server Health</span>
+</a>
+<a class="flex items-center space-x-3 px-4 py-3 rounded-full text-on-surface-variant hover:bg-surface-variant transition-colors" href="#">
+<span class="material-symbols-outlined">vpn_key</span>
+<span>SSH Keys</span>
+</a>
+<a class="flex items-center space-x-3 px-4 py-3 rounded-full text-on-surface-variant hover:bg-surface-variant transition-colors" href="#">
+<span class="material-symbols-outlined">monitoring</span>
+<span>API Usage</span>
+</a>
+<a class="flex items-center space-x-3 px-4 py-3 rounded-full text-on-surface-variant hover:bg-surface-variant transition-colors" href="#">
+<span class="material-symbols-outlined">menu_book</span>
+<span>Documentation</span>
+</a>
+</nav>
+<div class="pb-8 pt-4 border-t border-white/5">
+<p class="font-code text-xs text-on-surface-variant/60">V2.4.0-stable</p>
+</div>
+</div>
+</aside>
+<!-- Top App Bar -->
+<header class="flex justify-between items-center px-4 h-16 w-full z-50 bg-background/80 backdrop-blur-md border-b border-white/5 top-0 sticky">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-primary">terminal</span>
+<h1 class="font-code font-bold text-primary tracking-tighter">OpenCode Remote</h1>
+</div>
+<div class="h-8 w-8 rounded-full bg-surface-variant border border-outline-variant flex items-center justify-center overflow-hidden">
+<img alt="User Avatar" class="w-full h-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDXPMTnMJAaddwlYImwEzuqphIZzry8MG6ZzSsU2Acd7hRFokcH_UxYTZuJ-3lpQ3pLzRfAEVoCTx4OqQgEMYliRj7H2bgIbQLDAQj0VNnHgwUZgtWrnhVKytqWkkPlhT3ANE-7XFLgyTzELIXPz2DNVLP_sEzJgFFDyZdPgj4VhKFaNRANUbMB13egp9bXkA-r6SDlNZIqYgU-iYhp8axPjAV6psotVE2roJG5990iLHhOnJGDe2tc"/>
+</div>
+</header>
+<!-- Main Content -->
+<main class="flex-1 p-6 md:p-12 flex flex-col items-center gap-8 max-w-3xl w-full mx-auto pb-32">
+<!-- Centered Header -->
+<div class="text-center">
+<h2 class="font-headline-lg text-headline-lg text-primary mb-2">Permission Queue</h2>
+<div class="inline-flex items-center px-3 py-1 bg-surface-container rounded-full text-on-surface-variant text-sm border border-white/5">
+                3 Pending Requests
+            </div>
+</div>
+<!-- Request Card 1 -->
+<article class="glass-panel w-full rounded-2xl overflow-hidden shadow-xl transition-all hover:shadow-primary/5">
+<div class="p-6 flex flex-col gap-6">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="h-10 w-10 rounded-full bg-error/10 flex items-center justify-center text-error">
+<span class="material-symbols-outlined">terminal</span>
+</div>
+<div>
+<h3 class="font-semibold text-lg leading-tight">Execute Command</h3>
+<p class="text-sm text-on-surface-variant">Legacy Cleanup Session</p>
+</div>
+</div>
+<span class="px-3 py-1 bg-surface-container-highest rounded-full text-[10px] font-bold tracking-widest text-primary border border-white/10 uppercase">Bash</span>
+</div>
+<div class="bg-surface-container-lowest rounded-xl p-4 border border-white/5">
+<code class="font-code text-error block text-sm overflow-x-auto whitespace-nowrap">rm -rf ./tmp/cache_old</code>
+</div>
+<div class="flex flex-col gap-3 items-center">
+<button class="w-full py-4 px-8 rounded-full bg-primary text-on-primary font-bold shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all">
+                        Allow Once
+                    </button>
+<div class="flex w-full gap-3">
+<button class="flex-1 py-3 px-4 rounded-full border border-outline-variant text-tertiary font-medium hover:bg-white/5 transition-colors">
+                            Always Allow
+                        </button>
+<button class="flex-1 py-3 px-4 rounded-full border border-outline-variant text-error font-medium hover:bg-error/5 transition-colors">
+                            Deny
+                        </button>
+</div>
+</div>
+</div>
+</article>
+<!-- Request Card 2 -->
+<article class="glass-panel w-full rounded-2xl overflow-hidden shadow-xl transition-all">
+<div class="p-6 flex flex-col gap-6">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="h-10 w-10 rounded-full bg-secondary/10 flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined">edit_square</span>
+</div>
+<div>
+<h3 class="font-semibold text-lg leading-tight">Modify File</h3>
+<p class="text-sm text-on-surface-variant">Refactor Auth Service</p>
+</div>
+</div>
+<span class="px-3 py-1 bg-surface-container-highest rounded-full text-[10px] font-bold tracking-widest text-secondary border border-white/10 uppercase">Python</span>
+</div>
+<div class="bg-surface-container-lowest rounded-xl overflow-hidden border border-white/5">
+<div class="px-4 py-2 bg-surface-container text-xs text-on-surface-variant font-code border-b border-white/5 flex items-center justify-between">
+<span>app/main.py</span>
+<span class="opacity-50">Line 24</span>
+</div>
+<div class="p-4 font-code text-sm space-y-1">
+<div class="text-error bg-error/10 px-2 py-0.5 rounded opacity-80">- def verify_token(token: str):</div>
+<div class="text-[#00C853] bg-[#00C853]/10 px-2 py-0.5 rounded">+ def verify_token(token: str, options: dict = None):</div>
+</div>
+</div>
+<div class="flex flex-col gap-3 items-center">
+<button class="w-full py-4 px-8 rounded-full bg-primary text-on-primary font-bold shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all">
+                        Allow Once
+                    </button>
+<div class="flex w-full gap-3">
+<button class="flex-1 py-3 px-4 rounded-full border border-outline-variant text-tertiary font-medium hover:bg-white/5 transition-colors">
+                            Always Allow
+                        </button>
+<button class="flex-1 py-3 px-4 rounded-full border border-outline-variant text-error font-medium hover:bg-error/5 transition-colors">
+                            Deny
+                        </button>
+</div>
+</div>
+</div>
+</article>
+<!-- Empty State -->
+<div class="w-full p-12 rounded-2xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center text-center opacity-40">
+<span class="material-symbols-outlined text-5xl mb-4 text-on-surface-variant">verified</span>
+<h4 class="font-semibold text-primary mb-1">Queue Clear</h4>
+<p class="text-sm text-on-surface-variant">All agents are currently executing autonomously.</p>
+</div>
+</main>
+<!-- Bottom Nav Bar (Mobile) -->
+<nav class="fixed bottom-0 w-full z-50 flex justify-around items-center px-4 pb-safe h-20 bg-surface-container-low/90 backdrop-blur-2xl border-t border-white/5 rounded-t-2xl md:hidden">
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 hover:opacity-100 transition-opacity w-16" href="#">
+<span class="material-symbols-outlined mb-1">dashboard</span>
+<span class="font-label-sm text-[10px] uppercase">Dash</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 hover:opacity-100 transition-opacity w-16" href="#">
+<span class="material-symbols-outlined mb-1">target</span>
+<span class="font-label-sm text-[10px] uppercase">Sessions</span>
+</a>
+<a class="flex flex-col items-center justify-center text-primary hover:opacity-100 transition-opacity w-16" href="#">
+<span class="material-symbols-outlined mb-1" style="font-variation-settings: 'FILL' 1;">rule</span>
+<span class="font-label-sm text-[10px] uppercase">Perms</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 hover:opacity-100 transition-opacity w-16" href="#">
+<span class="material-symbols-outlined mb-1">terminal</span>
+<span class="font-label-sm text-[10px] uppercase">Logs</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 hover:opacity-100 transition-opacity w-16" href="#">
+<span class="material-symbols-outlined mb-1">settings</span>
+<span class="font-label-sm text-[10px] uppercase">Settings</span>
+</a>
+</nav>
+</body></html>

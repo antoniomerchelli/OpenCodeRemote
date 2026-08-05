@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenCode Remote — Obsidian Flux Design System</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --surface-dim: #131314;
+    --surface-container-low: #1c1b1c;
+    --surface-container: #201f20;
+    --surface-container-high: #2a2a2b;
+    --on-surface: #e5e2e3;
+    --on-surface-variant: #c1c6d7;
+    --outline: #8b90a0;
+    --primary: #adc6ff;
+    --secondary: #c0c1ff;
+    --tertiary: #ddb7ff;
+    --error: #ffb4ab;
+    --accent-green: #39D2C0;
+    --accent-yellow: #fbbf24;
+    --background: #0e0e10;
+    --border-subtle: rgba(255,255,255,0.04);
+    --border-medium: rgba(255,255,255,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--background);
+    color: var(--on-surface);
+    min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    background: var(--surface-dim);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 32px 48px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(20px);
+  }
+
+  .header h1 {
+    font-size: 32px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--primary);
+  }
+
+  .header p {
+    font-size: 16px;
+    color: var(--on-surface-variant);
+    margin-top: 8px;
+    letter-spacing: -0.01em;
+  }
+
+  .header .badge {
+    display: inline-block;
+    margin-top: 12px;
+    padding: 6px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--primary);
+    background: rgba(173, 198, 255, 0.1);
+    border: 1px solid rgba(173, 198, 255, 0.2);
+    border-radius: 999px;
+  }
+
+  /* Grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 32px;
+    padding: 48px;
+  }
+
+  .screen-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .screen-frame {
+    width: 100%;
+    aspect-ratio: 390 / 844;
+    border-radius: 32px;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+    background: var(--surface-container-low);
+    position: relative;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .screen-frame:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 24px 48px rgba(0,0,0,0.4);
+  }
+
+  .screen-frame iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #0e0e10;
+  }
+
+  .screen-label {
+    margin-top: 16px;
+    text-align: center;
+  }
+
+  .screen-label h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--on-surface);
+    letter-spacing: -0.01em;
+  }
+
+  .screen-label p {
+    font-size: 14px;
+    color: var(--outline);
+    margin-top: 4px;
+  }
+
+  /* Specs section */
+  .specs {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 24px;
+    padding: 48px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .spec-card {
+    background: var(--surface-container-low);
+    border-radius: 24px;
+    padding: 24px;
+    border: 1px solid var(--border-subtle);
+  }
+
+  .spec-card h4 {
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--outline);
+    margin-bottom: 12px;
+  }
+
+  .color-swatch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 13px;
+    color: var(--on-surface-variant);
+  }
+
+  .color-swatch .swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+
+  .color-swatch .name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+
+  .color-swatch .hex {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--outline);
+  }
+
+  @media (max-width: 768px) {
+    .header { padding: 24px; }
+    .grid { grid-template-columns: 1fr; padding: 24px; }
+    .specs { grid-template-columns: 1fr 1fr; padding: 24px; }
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>✦ Obsidian Flux</h1>
+    <p>OpenCode Remote — Design System · iOS 17+ · SwiftUI</p>
+    <span class="badge">v1.0 · 40+ design tokens · glassmorphism</span>
+  </div>
+
+  <div class="grid">
+    <div class="screen-card">
+      <div class="screen-frame">
+        <iframe src="dashboard_modern/code.html"></iframe>
+      </div>
+      <div class="screen-label">
+        <h3>Dashboard</h3>
+        <p>Stato server, progetto attivo, sessioni in tempo reale</p>
+      </div>
+    </div>
+
+    <div class="screen-card">
+      <div class="screen-frame">
+        <iframe src="session_timeline_modern_1/code.html"></iframe>
+      </div>
+      <div class="screen-label">
+        <h3>Timeline Sessione</h3>
+        <p>Messaggi, thinking bubble, tool call card</p>
+      </div>
+    </div>
+
+    <div class="screen-card">
+      <div class="screen-frame">
+        <iframe src="session_timeline_modern_2/code.html"></iframe>
+      </div>
+      <div class="screen-label">
+        <h3>Timeline (espansa)</h3>
+        <p>Argomenti tool, risultati, stati animati</p>
+      </div>
+    </div>
+
+    <div class="screen-card">
+      <div class="screen-frame">
+        <iframe src="permission_queue_modern/code.html"></iframe>
+      </div>
+      <div class="screen-label">
+        <h3>Permessi</h3>
+        <p>Approvazione comandi, Always Allow, Deny</p>
+      </div>
+    </div>
+
+    <div class="screen-card">
+      <div class="screen-frame">
+        <iframe src="connection_modern/code.html"></iframe>
+      </div>
+      <div class="screen-label">
+        <h3>Connessione</h3>
+        <p>Setup server, Tailscale, autenticazione</p>
+      </div>
+    </div>
+
+    <div class="screen-card">
+      <div class="screen-frame">
+        <iframe src="remote_terminal_modern/code.html"></iframe>
+      </div>
+      <div class="screen-label">
+        <h3>Terminale Remoto</h3>
+        <p>ANSI output, history, comandi rapidi</p>
+      </div>
+    </div>
+
+    <div class="screen-card">
+      <div class="screen-frame">
+        <iframe src="logs_health_modern/code.html"></iframe>
+      </div>
+      <div class="screen-label">
+        <h3>Logs & Health</h3>
+        <p>Eventi in tempo reale, stato sistema</p>
+      </div>
+    </div>
+
+    <div class="screen-card">
+      <div class="screen-frame">
+        <iframe src="tools_health_modern/code.html"></iframe>
+      </div>
+      <div class="screen-label">
+        <h3>Strumenti</h3>
+        <p>Tool status, agenti, provider</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="specs">
+    <div class="spec-card">
+      <h4>Colori Superficie</h4>
+      <div class="color-swatch"><div class="swatch" style="background:#131314"></div><span class="name">surface-dim</span><span class="hex">#131314</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#1c1b1c"></div><span class="name">surface-container-low</span><span class="hex">#1c1b1c</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#201f20"></div><span class="name">surface-container</span><span class="hex">#201f20</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#2a2a2b"></div><span class="name">surface-container-high</span><span class="hex">#2a2a2b</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#353436"></div><span class="name">surface-container-highest</span><span class="hex">#353436</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#0e0e0f"></div><span class="name">surface-container-lowest</span><span class="hex">#0e0e0f</span></div>
+    </div>
+
+    <div class="spec-card">
+      <h4>Colori Testo</h4>
+      <div class="color-swatch"><div class="swatch" style="background:#e5e2e3"></div><span class="name">on-surface</span><span class="hex">#e5e2e3</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#c1c6d7"></div><span class="name">on-surface-variant</span><span class="hex">#c1c6d7</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#8b90a0"></div><span class="name">outline</span><span class="hex">#8b90a0</span></div>
+    </div>
+
+    <div class="spec-card">
+      <h4>Accent</h4>
+      <div class="color-swatch"><div class="swatch" style="background:#adc6ff"></div><span class="name">primary</span><span class="hex">#adc6ff</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#c0c1ff"></div><span class="name">secondary</span><span class="hex">#c0c1ff</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#ddb7ff"></div><span class="name">tertiary</span><span class="hex">#ddb7ff</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#39D2C0"></div><span class="name">success</span><span class="hex">#39D2C0</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#fbbf24"></div><span class="name">warning</span><span class="hex">#fbbf24</span></div>
+      <div class="color-swatch"><div class="swatch" style="background:#ffb4ab"></div><span class="name">error</span><span class="hex">#ffb4ab</span></div>
+    </div>
+
+    <div class="spec-card">
+      <h4>Tipografia</h4>
+      <div style="font-size:48px;font-weight:600;letter-spacing:-0.04em;color:var(--primary);line-height:1">display-lg</div>
+      <div style="font-size:24px;font-weight:600;letter-spacing:-0.02em;margin-top:12px;color:var(--on-surface)">headline-lg-mobile</div>
+      <div style="font-size:16px;margin-top:8px;color:var(--on-surface-variant)">body-md · Lettering -0.01em</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500;letter-spacing:0.02em;margin-top:8px;color:var(--outline)">label-sm · UPPERCASE · TRACKING 2%</div>
+    </div>
+  </div>
+
+  <div style="text-align:center;padding:32px;border-top:1px solid var(--border-subtle);color:var(--outline);font-size:14px">
+    Obsidian Flux · Design system per OpenCode Remote iOS · SwiftUI · 2026
+  </div>
+</body>
+</html>

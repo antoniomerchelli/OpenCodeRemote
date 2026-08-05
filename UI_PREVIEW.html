@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenCode Remote — Obsidian Flux</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --surface-dim: #131314;
+    --surface-container-low: #1c1b1c;
+    --surface-container: #201f20;
+    --surface-container-high: #2a2a2b;
+    --on-surface: #e5e2e3;
+    --on-surface-variant: #c1c6d7;
+    --outline: #8b90a0;
+    --primary: #adc6ff;
+    --secondary: #c0c1ff;
+    --tertiary: #ddb7ff;
+    --error: #ffb4ab;
+    --accent-green: #39D2C0;
+    --accent-yellow: #fbbf24;
+    --background: #0e0e10;
+    --border-subtle: rgba(255,255,255,0.04);
+    --border-medium: rgba(255,255,255,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--background);
+    color: var(--on-surface);
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    background: var(--surface-dim);
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 24px 48px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(20px);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .header-left h1 {
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--primary);
+  }
+  .header-left p {
+    font-size: 14px;
+    color: var(--on-surface-variant);
+    margin-top: 4px;
+  }
+
+  .header-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    padding: 6px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    border-radius: 999px;
+  }
+  .badge-primary { background: rgba(173,198,255,0.12); color: var(--primary); border: 1px solid rgba(173,198,255,0.2); }
+  .badge-green { background: rgba(57,210,192,0.12); color: var(--accent-green); border: 1px solid rgba(57,210,192,0.2); }
+  .badge-outline { background: transparent; color: var(--outline); border: 1px solid var(--border-medium); }
+
+  /* ── LAYOUT ── */
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+
+  /* ── SCREEN TABS ── */
+  .screen-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 32px;
+    overflow-x: auto;
+    padding: 4px;
+    background: var(--surface-container-low);
+    border-radius: 16px;
+    border: 1px solid var(--border-subtle);
+  }
+  .screen-tab {
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--on-surface-variant);
+    border-radius: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s;
+    border: none;
+    background: transparent;
+    font-family: inherit;
+  }
+  .screen-tab:hover { color: var(--on-surface); background: rgba(255,255,255,0.04); }
+  .screen-tab.active { color: var(--primary); background: rgba(173,198,255,0.1); font-weight: 600; }
+
+  /* ── PHONE FRAME ── */
+  .phone-wrapper {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 24px;
+  }
+  .iphone {
+    position: relative;
+    width: 393px;
+    height: 852px;
+    background: #0e0e10;
+    border-radius: 55px;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.06),
+      0 0 0 8px #1a1a22,
+      0 0 40px rgba(0,0,0,0.8),
+      0 30px 80px rgba(0,0,0,0.6);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .iphone::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 55px;
+    pointer-events: none;
+    z-index: 10;
+    background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, transparent 40%);
+  }
+  .iphone-notch {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 160px;
+    height: 34px;
+    background: #0e0e10;
+    border-radius: 0 0 20px 20px;
+    z-index: 20;
+  }
+  .iphone iframe {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #0e0e10;
+  }
+
+  /* ── SCREEN INFO ── */
+  .screen-info {
+    max-width: 700px;
+    margin: 0 auto;
+    text-align: center;
+  }
+  .screen-info h2 {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--on-surface);
+    margin-bottom: 4px;
+  }
+  .screen-info p {
+    font-size: 14px;
+    color: var(--on-surface-variant);
+    line-height: 1.6;
+  }
+  .screen-info .file-ref {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 4px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--primary);
+    background: rgba(173,198,255,0.08);
+    border-radius: 6px;
+    border: 1px solid rgba(173,198,255,0.12);
+  }
+
+  /* ── BUTTONS TABLE ── */
+  .buttons-table {
+    margin-top: 32px;
+    background: var(--surface-container-low);
+    border-radius: 16px;
+    border: 1px solid var(--border-subtle);
+    overflow: hidden;
+  }
+  .buttons-table table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .buttons-table th {
+    text-align: left;
+    padding: 12px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--outline);
+    background: var(--surface-container);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .buttons-table td {
+    padding: 12px 16px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border-subtle);
+    vertical-align: top;
+  }
+  .buttons-table tr:last-child td { border-bottom: none; }
+  .buttons-table .api { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--tertiary); }
+  .buttons-table .file { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--outline); }
+  .buttons-table .btn-label { font-weight: 500; color: var(--on-surface); }
+
+  /* ── SPECS ── */
+  .specs-section {
+    margin-top: 48px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .specs-section h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--on-surface);
+    margin-bottom: 20px;
+  }
+  .specs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .spec-card {
+    background: var(--surface-container-low);
+    border-radius: 16px;
+    padding: 20px;
+    border: 1px solid var(--border-subtle);
+  }
+  .spec-card h4 {
+    font-size: 11px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--outline);
+    margin-bottom: 12px;
+  }
+  .color-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 12px;
+    color: var(--on-surface-variant);
+  }
+  .color-row .swatch {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+  .color-row .hex {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--outline);
+  }
+
+  .stats-row {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+    justify-content: center;
+  }
+  .stat {
+    text-align: center;
+  }
+  .stat .num {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--primary);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .stat .label {
+    font-size: 12px;
+    color: var(--outline);
+    margin-top: 2px;
+  }
+
+  /* ── NAVIGATION ── */
+  .nav-controls {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .nav-btn {
+    padding: 10px 24px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid var(--border-medium);
+    background: var(--surface-container);
+    color: var(--on-surface-variant);
+    font-family: inherit;
+  }
+  .nav-btn:hover { background: var(--surface-container-high); color: var(--on-surface); }
+  .nav-btn.primary { background: var(--primary); color: var(--surface-dim); border-color: var(--primary); }
+  .nav-btn.primary:hover { opacity: 0.9; }
+
+  @media (max-width: 768px) {
+    .header { padding: 16px 20px; flex-direction: column; align-items: flex-start; }
+    .container { padding: 16px; }
+    .iphone { width: 340px; height: 738px; border-radius: 44px; }
+    .iphone::before { border-radius: 44px; }
+    .specs-grid { grid-template-columns: 1fr 1fr; }
+    .screen-tabs { gap: 2px; }
+    .screen-tab { padding: 8px 12px; font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <h1>✦ OpenCode Remote</h1>
+      <p>Obsidian Flux · iOS 17+ · SwiftUI · Build pulito ✅</p>
+    </div>
+    <div class="header-badges">
+      <span class="badge badge-primary">12 file Swift</span>
+      <span class="badge badge-green">6279 righe</span>
+      <span class="badge badge-primary">27 pulsanti logici</span>
+      <span class="badge badge-outline">24 API endpoints</span>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="stats-row">
+      <div class="stat"><div class="num">12</div><div class="label">File Swift</div></div>
+      <div class="stat"><div class="num">6.279</div><div class="label">Righe di codice</div></div>
+      <div class="stat"><div class="num">8</div><div class="label">Schermate</div></div>
+      <div class="stat"><div class="num">27</div><div class="label">Pulsanti funzionanti</div></div>
+      <div class="stat"><div class="num">24</div><div class="label">Chiamate API</div></div>
+      <div class="stat"><div class="num">40+</div><div class="label">Design Tokens</div></div>
+    </div>
+
+    <!-- TABS -->
+    <div class="screen-tabs" id="tabs">
+      <button class="screen-tab active" data-index="0">Dashboard</button>
+      <button class="screen-tab" data-index="1">Timeline</button>
+      <button class="screen-tab" data-index="2">Sessione</button>
+      <button class="screen-tab" data-index="3">Permessi</button>
+      <button class="screen-tab" data-index="4">Connessione</button>
+      <button class="screen-tab" data-index="5">Terminale</button>
+      <button class="screen-tab" data-index="6">Logs</button>
+      <button class="screen-tab" data-index="7">Strumenti</button>
+    </div>
+
+    <!-- PHONE -->
+    <div class="phone-wrapper">
+      <div class="iphone">
+        <div class="iphone-notch"></div>
+        <iframe id="phone-frame" src="stitch_opencode_remote_dashboard/dashboard_modern/code.html"></iframe>
+      </div>
+    </div>
+
+    <!-- INFO -->
+    <div class="screen-info" id="screen-info">
+      <h2 id="screen-title">Dashboard</h2>
+      <p id="screen-desc">Stato server, progetto attivo, sessioni attive, notifiche pending</p>
+      <div class="file-ref" id="file-ref">SessionViews.swift · DashboardView</div>
+    </div>
+
+    <!-- NAV -->
+    <div class="nav-controls">
+      <button class="nav-btn" id="prev-btn">← Precedente</button>
+      <button class="nav-btn primary" id="open-btn">Apri in nuova finestra</button>
+      <button class="nav-btn" id="next-btn">Successivo →</button>
+    </div>
+
+    <!-- BUTTONS TABLE -->
+    <div class="buttons-table" id="buttons-table"></div>
+
+    <!-- DESIGN SPECS -->
+    <div class="specs-section">
+      <h3>Design System · Obsidian Flux</h3>
+      <div class="specs-grid">
+        <div class="spec-card">
+          <h4>Colori Superficie</h4>
+          <div class="color-row"><div class="swatch" style="background:#131314"></div>surface-dim<span class="hex">#131314</span></div>
+          <div class="color-row"><div class="swatch" style="background:#1c1b1c"></div>surface-container-low<span class="hex">#1c1b1c</span></div>
+          <div class="color-row"><div class="swatch" style="background:#201f20"></div>surface-container<span class="hex">#201f20</span></div>
+          <div class="color-row"><div class="swatch" style="background:#2a2a2b"></div>surface-container-high<span class="hex">#2a2a2b</span></div>
+          <div class="color-row"><div class="swatch" style="background:#0e0e0f"></div>surface-container-lowest<span class="hex">#0e0e0f</span></div>
+        </div>
+        <div class="spec-card">
+          <h4>Testo & Outline</h4>
+          <div class="color-row"><div class="swatch" style="background:#e5e2e3"></div>on-surface<span class="hex">#e5e2e3</span></div>
+          <div class="color-row"><div class="swatch" style="background:#c1c6d7"></div>on-surface-variant<span class="hex">#c1c6d7</span></div>
+          <div class="color-row"><div class="swatch" style="background:#8b90a0"></div>outline<span class="hex">#8b90a0</span></div>
+          <div class="color-row"><div class="swatch" style="background:#414755"></div>outline-variant<span class="hex">#414755</span></div>
+        </div>
+        <div class="spec-card">
+          <h4>Accent</h4>
+          <div class="color-row"><div class="swatch" style="background:#adc6ff"></div>primary<span class="hex">#adc6ff</span></div>
+          <div class="color-row"><div class="swatch" style="background:#c0c1ff"></div>secondary<span class="hex">#c0c1ff</span></div>
+          <div class="color-row"><div class="swatch" style="background:#ddb7ff"></div>tertiary<span class="hex">#ddb7ff</span></div>
+          <div class="color-row"><div class="swatch" style="background:#39D2C0"></div>success<span class="hex">#39D2C0</span></div>
+          <div class="color-row"><div class="swatch" style="background:#fbbf24"></div>warning<span class="hex">#fbbf24</span></div>
+          <div class="color-row"><div class="swatch" style="background:#ffb4ab"></div>error<span class="hex">#ffb4ab</span></div>
+        </div>
+        <div class="spec-card">
+          <h4>Tipografia</h4>
+          <div style="font-size:20px;font-weight:600;letter-spacing:-0.02em;color:var(--primary)">Headline Mobile</div>
+          <div style="font-size:15px;margin-top:8px;color:var(--on-surface-variant)">Body text with -0.01em tracking</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;letter-spacing:0.02em;margin-top:8px;text-transform:uppercase;color:var(--outline)">Label SM · TRACKING 2%</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:13px;margin-top:6px;color:var(--on-surface-variant)">Code / Monospace</div>
+        </div>
+        <div class="spec-card">
+          <h4>Componenti</h4>
+          <div style="font-size:13px;color:var(--on-surface-variant);line-height:1.8">
+            • Glassmorphism (backdrop blur + border)<br>
+            • Floating Tab Bar (rounded-3xl)<br>
+            • Status Chip (capsule, semi-trasparente)<br>
+            • Session Card (2.5rem radius, glow)<br>
+            • Pulse/Glow animations<br>
+            • Pill buttons with gradient<br>
+            • Syntax highlighting (Swift keywords)
+          </div>
+        </div>
+        <div class="spec-card">
+          <h4>Architettura</h4>
+          <div style="font-size:13px;color:var(--on-surface-variant);line-height:1.8">
+            • MVVM con @Observable AppState<br>
+            • V1OpenCodeAPIClient (~80 endpoints)<br>
+            • SSE event stream (13 event types)<br>
+            • Keychain + Face ID<br>
+            • Live Activities + Widgets<br>
+            • Swift 5.9 · iOS 17+<br>
+            • SwiftPM cross-platform
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center;padding:40px 0 20px;color:var(--outline);font-size:13px">
+      OpenCode Remote iOS · Progetto completato · Luglio 2026
+    </div>
+  </div>
+
+  <script>
+    const screens = [
+      {
+        name: 'Dashboard',
+        desc: 'Stato server, progetto attivo, sessioni attive, notifiche pending. Pulsanti: Nuova sessione, VIEW ALL, Disconnetti.',
+        file: 'SessionViews.swift · DashboardView',
+        src: 'stitch_opencode_remote_dashboard/dashboard_modern/code.html',
+        buttons: [
+          ['Nuova sessione (+)', 'apiClient.createSession(CreateSessionRequest(title: "Nuova sessione"))', 'SessionViews.swift:190'],
+          ['VIEW ALL', 'selectedTab = 1 (Sessions tab)', 'SessionViews.swift:113'],
+          ['Disconnetti', 'appState.disconnect()', 'SessionViews.swift:179'],
+          ['Session row tap', 'NavigationLink(value:) → SessionDetailView', 'SessionViews.swift:127']
+        ]
+      },
+      {
+        name: 'Timeline Sessione',
+        desc: 'Cronologia messaggi con thinking bubble, tool call card, messaggi utente/asst. Menu azioni con Cambia agente/modello, Fork, Interrompi, Diff, Riassumi.',
+        file: 'SessionViews.swift · SessionDetailView',
+        src: 'stitch_opencode_remote_dashboard/session_timeline_modern_1/code.html',
+        buttons: [
+          ['Invia messaggio', 'apiClient.sendMessageAsync(session.id, request:)', 'SessionViews.swift:525'],
+          ['Cambia agente (menu)', 'sheet → apiClient.listAgents() → createSession(agentId:)', 'SessionViews.swift:458'],
+          ['Cambia modello (menu)', 'sheet → apiClient.setSessionModel(session.id, modelId:)', 'SessionViews.swift:461'],
+          ['Fork (menu)', 'apiClient.forkSession(session.id, messageId: nil)', 'SessionViews.swift:464'],
+          ['Interrompi (menu)', 'apiClient.abortSession(session.id)', 'SessionViews.swift:467'],
+          ['Vedi modifiche (menu)', 'apiClient.getSessionDiff(session.id, messageId: nil)', 'SessionViews.swift:471'],
+          ['Riassumi (menu)', 'apiClient.summarizeSession(session.id, request:)', 'SessionViews.swift:474']
+        ]
+      },
+      {
+        name: 'Timeline espansa',
+        desc: 'Messaggio espanso con tool call arguments, results, thinking content, e QuestionCard con rispondi/rifiuta.',
+        file: 'SessionViews.swift · MessagePartView · QuestionCard',
+        src: 'stitch_opencode_remote_dashboard/session_timeline_modern_2/code.html',
+        buttons: [
+          ['Expand thinking', 'Toggle isExpanded state', 'DesignSystem.swift:546'],
+          ['Expand tool call', 'Toggle isExpanded state', 'DesignSystem.swift:616'],
+          ['Rispondi (QuestionCard)', 'apiClient.answerQuestion(sessionId, questionId:, response:)', 'SessionViews.swift:995'],
+          ['Rifiuta (QuestionCard)', 'apiClient.declineQuestion(sessionId, questionId:)', 'SessionViews.swift:1007']
+        ]
+      },
+      {
+        name: 'Permessi',
+        desc: 'Richiesta di permesso per esecuzione comandi. Pulsanti Allow Once (gradient pill), Always Allow, Deny.',
+        file: 'DesignSystem.swift · PermissionCard',
+        src: 'stitch_opencode_remote_dashboard/permission_queue_modern/code.html',
+        buttons: [
+          ['Allow Once', 'apiClient.replyPermission(sessionId, permissionId, .approve)', 'DesignSystem.swift:949'],
+          ['Always Allow', 'ConfirmationDialog → apiClient.replyPermission(.approveAlways)', 'DesignSystem.swift:962'],
+          ['Deny', 'apiClient.replyPermission(sessionId, permissionId, .deny)', 'DesignSystem.swift:977']
+        ]
+      },
+      {
+        name: 'Connessione',
+        desc: 'Setup server con host, porta, TLS, Tailscale, username/password. Test connessione e salvataggio Keychain.',
+        file: 'MainViews.swift · AddServerView',
+        src: 'stitch_opencode_remote_dashboard/connection_modern/code.html',
+        buttons: [
+          ['Test connessione', 'client.health() → mostra versione o errore', 'MainViews.swift:290'],
+          ['Salva', 'appState.saveSettings() + keychain.saveCredentials()', 'MainViews.swift:324'],
+          ['Annulla', 'dismiss()', 'MainViews.swift:280'],
+          ['ServerRow tap', 'appState.connect(to: server)', 'MainViews.swift:167']
+        ]
+      },
+      {
+        name: 'Terminale Remoto',
+        desc: 'Terminale con output ANSI, history comandi (50), split keyboard con ESC/TAB/frecce/CTRL. Invio esegue shell remoto.',
+        file: 'TerminalView.swift · TerminalViewModel',
+        src: 'stitch_opencode_remote_dashboard/remote_terminal_modern/code.html',
+        buttons: [
+          ['Send command', 'apiClient.executeShell(sessionId, request:)', 'TerminalView.swift:452'],
+          ['History button', 'sheet con commandHistory (swipe per eliminare)', 'TerminalView.swift:267'],
+          ['Split keyboard toggle', 'mostra/nasconde extendedKeyboard', 'TerminalView.swift:282'],
+          ['ESC/TAB/↑/↓/CTRL keys', 'insertText() → viewModel.currentInput.append()', 'TerminalView.swift:472']
+        ]
+      },
+      {
+        name: 'Logs & Health',
+        desc: 'Stato server in tempo reale, eventi SSE, health metrics (uptime, latency, active sessions, CPU/memory).',
+        file: 'SessionViews.swift · DashboardView',
+        src: 'stitch_opencode_remote_dashboard/logs_health_modern/code.html',
+        buttons: [
+          ['Server status chip', 'appState.isConnected ? "Connected" : "Offline"', 'SessionViews.swift:47']
+        ]
+      },
+      {
+        name: 'Strumenti',
+        desc: 'Lista agenti (primari, subagent, sistema), provider (connessi/disponibili), tool status.',
+        file: 'AgentViews.swift · AgentsView · ProvidersView',
+        src: 'stitch_opencode_remote_dashboard/tools_health_modern/code.html',
+        buttons: [
+          ['Agente tap', 'NavigationLink → AgentDetailView', 'AgentViews.swift:34'],
+          ['Usa questo agente', 'apiClient.createSession(agentId: agent.id)', 'AgentViews.swift:331'],
+          ['Provider tap', 'NavigationLink → ProviderDetailView', 'AgentViews.swift:389'],
+          ['Connetti API Key', 'apiClient.setAuthAPIKey(provider.id, apiKey:)', 'AgentViews.swift:717'],
+          ['Connetti OAuth', 'apiClient.oauthAuthorize(provider.id, redirectUri:)', 'AgentViews.swift:737'],
+          ['Disconnetti provider', 'apiClient.setAuthAPIKey(provider.id, apiKey: "")', 'AgentViews.swift:749'],
+          ['Refresh (pull)', 'apiClient.listAgents() / apiClient.listProviders()', 'AgentViews.swift:110'],
+          ['Crea provider +', 'apiClient.createProviderConfig(request)', 'AgentViews.swift:909']
+        ]
+      }
+    ];
+
+    let currentScreen = 0;
+    const frame = document.getElementById('phone-frame');
+    const title = document.getElementById('screen-title');
+    const desc = document.getElementById('screen-desc');
+    const fileRef = document.getElementById('file-ref');
+    const table = document.getElementById('buttons-table');
+    const tabs = document.querySelectorAll('.screen-tab');
+
+    function renderButtons(buttons) {
+      if (!buttons.length) return '<div style="padding:16px;text-align:center;color:var(--outline);font-size:13px">Nessun pulsante interattivo</div>';
+      let html = `<table><tr><th>Pulsante</th><th>API Call / Logica</th><th>File</th></tr>`;
+      for (const [btn, api, file] of buttons) {
+        html += `<tr><td class="btn-label">${btn}</td><td class="api">${api}</td><td class="file">${file}</td></tr>`;
+      }
+      html += '</table>';
+      return html;
+    }
+
+    function showScreen(index) {
+      currentScreen = index;
+      const s = screens[index];
+      frame.src = s.src;
+      title.textContent = s.name;
+      desc.textContent = s.desc;
+      fileRef.textContent = s.file;
+      table.innerHTML = renderButtons(s.buttons);
+
+      tabs.forEach((tab, i) => {
+        tab.classList.toggle('active', i === index);
+      });
+    }
+
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        showScreen(parseInt(tab.dataset.index));
+      });
+    });
+
+    document.getElementById('prev-btn').addEventListener('click', () => {
+      showScreen((currentScreen - 1 + screens.length) % screens.length);
+    });
+    document.getElementById('next-btn').addEventListener('click', () => {
+      showScreen((currentScreen + 1) % screens.length);
+    });
+    document.getElementById('open-btn').addEventListener('click', () => {
+      window.open(screens[currentScreen].src, '_blank');
+    });
+
+    // Keyboard nav
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') showScreen((currentScreen - 1 + screens.length) % screens.length);
+      if (e.key === 'ArrowRight') showScreen((currentScreen + 1) % screens.length);
+    });
+
+    showScreen(0);
+  </script>
+</body>
+</html>

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>OpenCode Remote - Session Timeline</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=JetBrains+Mono:ital,wght@0,400;0,500;1,400&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-primary": "#002e69",
+                    "on-primary-container": "#00285c",
+                    "tertiary-fixed-dim": "#ddb7ff",
+                    "on-secondary-container": "#b0b2ff",
+                    "outline": "#8b90a0",
+                    "on-surface-variant": "#c1c6d7",
+                    "on-primary-fixed": "#001a41",
+                    "secondary-fixed-dim": "#c0c1ff",
+                    "surface-container-lowest": "#0e0e0f",
+                    "primary-fixed-dim": "#adc6ff",
+                    "inverse-on-surface": "#313031",
+                    "surface-container-highest": "#353436",
+                    "surface-dim": "#131314",
+                    "secondary-fixed": "#e1e0ff",
+                    "error-container": "#93000a",
+                    "on-tertiary": "#490080",
+                    "on-error": "#690005",
+                    "surface-bright": "#39393a",
+                    "primary": "#adc6ff",
+                    "background": "#131314",
+                    "on-secondary-fixed-variant": "#2f2ebe",
+                    "surface-tint": "#adc6ff",
+                    "error": "#ffb4ab",
+                    "on-surface": "#e5e2e3",
+                    "on-secondary-fixed": "#07006c",
+                    "on-primary-fixed-variant": "#004493",
+                    "surface-container": "#201f20",
+                    "secondary-container": "#3131c0",
+                    "surface-variant": "#353436",
+                    "on-error-container": "#ffdad6",
+                    "tertiary": "#ddb7ff",
+                    "surface": "#131314",
+                    "primary-container": "#4b8eff",
+                    "on-tertiary-fixed-variant": "#6900b3",
+                    "on-secondary": "#1000a9",
+                    "on-background": "#e5e2e3",
+                    "tertiary-container": "#b76dff",
+                    "surface-container-low": "#1c1b1c",
+                    "outline-variant": "#414755",
+                    "on-tertiary-container": "#400071",
+                    "inverse-primary": "#005bc1",
+                    "primary-fixed": "#d8e2ff",
+                    "secondary": "#c0c1ff",
+                    "tertiary-fixed": "#f0dbff",
+                    "surface-container-high": "#2a2a2b",
+                    "on-tertiary-fixed": "#2c0051",
+                    "inverse-surface": "#e5e2e3"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "gutter": "24px",
+                    "container-padding": "32px",
+                    "section-gap": "64px",
+                    "base": "8px"
+            },
+            "fontFamily": {
+                    "label-sm": [
+                            "JetBrains Mono"
+                    ],
+                    "headline-lg": [
+                            "Geist"
+                    ],
+                    "display-lg": [
+                            "Geist"
+                    ],
+                    "body-md": [
+                            "Geist"
+                    ],
+                    "headline-lg-mobile": [
+                            "Geist"
+                    ]
+            },
+            "fontSize": {
+                    "label-sm": [
+                            "12px",
+                            {
+                                    "lineHeight": "16px",
+                                    "letterSpacing": "0.02em",
+                                    "fontWeight": "500"
+                            }
+                    ],
+                    "headline-lg": [
+                            "32px",
+                            {
+                                    "lineHeight": "40px",
+                                    "letterSpacing": "-0.02em",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "display-lg": [
+                            "48px",
+                            {
+                                    "lineHeight": "56px",
+                                    "letterSpacing": "-0.04em",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "body-md": [
+                            "16px",
+                            {
+                                    "lineHeight": "24px",
+                                    "letterSpacing": "-0.01em",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "headline-lg-mobile": [
+                            "24px",
+                            {
+                                    "lineHeight": "32px",
+                                    "letterSpacing": "-0.02em",
+                                    "fontWeight": "600"
+                            }
+                    ]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background-color: theme('colors.background');
+            color: theme('colors.on-background');
+            font-family: 'Geist', sans-serif;
+        }
+        .data-mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        /* Smooth scrollbar for timeline */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: theme('colors.surface-container-high');
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: theme('colors.outline-variant');
+        }
+
+        /* Glassmorphism utilities */
+        .glass-panel {
+            background: rgba(32, 31, 32, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .thinking-glow {
+            box-shadow: 0 0 15px rgba(221, 183, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen overflow-hidden antialiased">
+<!-- TopAppBar JSON Anchor -->
+<header class="fixed top-0 w-full z-50 border-b border-outline-variant bg-background/80 backdrop-blur-md flex justify-between items-center px-6 h-14 cursor-pointer active:opacity-80">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary dark:text-primary-fixed-dim" data-icon="terminal">terminal</span>
+<h1 class="font-headline-sm text-headline-sm font-data-mono text-data-mono font-label-caps text-label-caps tracking-widest text-primary dark:text-primary">
+                OPENCODE REMOTE
+            </h1>
+</div>
+<!-- Session Header Content injected into AppBar area for this screen -->
+<div class="absolute left-1/2 transform -translate-x-1/2 flex items-center gap-4 hidden md:flex">
+<div class="flex flex-col items-center">
+<span class="font-body-md text-body-md text-on-surface">Refactor Auth Service</span>
+<div class="flex items-center gap-1.5 mt-0.5">
+<div class="w-1.5 h-1.5 rounded-full bg-tertiary"></div>
+<span class="font-label-sm text-label-sm text-outline">Processing</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-3">
+<button class="flex items-center justify-center w-8 h-8 rounded-full bg-error-container/20 text-error hover:bg-error-container transition-colors">
+<span class="material-symbols-outlined text-[18px]" data-icon="stop" style="font-variation-settings: 'FILL' 1;">stop</span>
+</button>
+<span class="font-label-sm text-label-sm text-outline-variant hover:bg-surface-container-high transition-colors px-2 py-1 rounded">v2.4.0-stable</span>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="flex-1 flex justify-center w-full pt-20 pb-32 overflow-y-auto px-4 md:px-0 relative">
+<!-- Ambient Background Light -->
+<div class="absolute top-1/4 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[800px] h-[600px] bg-primary-container opacity-5 rounded-full blur-[120px] pointer-events-none"></div>
+<div class="w-full max-w-3xl flex flex-col gap-section-gap relative z-10 pb-20">
+<!-- Timeline Block 1: User Message -->
+<div class="flex flex-col gap-2 w-full">
+<div class="flex items-center gap-2 mb-1">
+<div class="w-6 h-6 rounded-full bg-surface-container-high flex items-center justify-center">
+<span class="material-symbols-outlined text-[14px] text-on-surface" data-icon="person">person</span>
+</div>
+<span class="font-label-sm text-label-sm text-outline">You</span>
+</div>
+<div class="pl-8">
+<p class="font-body-md text-body-md text-on-surface leading-relaxed">
+                        I need to refactor the authentication service in `src/auth/service.ts`. It's currently using basic JWT verification, but we need to implement refresh token rotation and move the session state to Redis. Can you analyze the current file and propose a plan?
+                    </p>
+</div>
+</div>
+<!-- Timeline Block 2: Thinking Process -->
+<div class="flex flex-col gap-2 w-full">
+<div class="flex items-center gap-2 mb-1">
+<div class="w-6 h-6 rounded-full bg-tertiary-container/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-[14px] text-tertiary" data-icon="psychology">psychology</span>
+</div>
+<span class="font-label-sm text-label-sm text-tertiary">Model Reasoning</span>
+</div>
+<div class="pl-8 w-full">
+<div class="border border-tertiary/30 bg-tertiary/5 rounded-xl p-4 thinking-glow" id="thinking-block">
+<div class="flex justify-between items-center cursor-pointer" onclick="toggleThinking()">
+<span class="font-label-sm text-label-sm text-tertiary flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] animate-spin" data-icon="progress_activity">progress_activity</span>
+                                Analyzing request constraints...
+                            </span>
+<span class="material-symbols-outlined text-tertiary transition-transform duration-300" data-icon="expand_more" id="thinking-chevron">expand_more</span>
+</div>
+<div class="mt-4 data-mono text-sm text-on-surface-variant italic leading-relaxed border-t border-tertiary/10 pt-4" id="thinking-content">
+                            Goal: Refactor src/auth/service.ts to support refresh token rotation and Redis-backed session state.<br/><br/>
+                            Steps:<br/>
+                            1. Read current implementation of src/auth/service.ts to understand the baseline.<br/>
+                            2. Identify JWT generation/verification logic.<br/>
+                            3. Formulate architecture for refresh tokens (short-lived access token, long-lived refresh token mapped in Redis).<br/>
+                            4. Draft tool calls to read files and subsequently write the updated implementation.<br/>
+<br/>
+                            I need to read the file first.
+                        </div>
+</div>
+</div>
+</div>
+<!-- Timeline Block 3: Tool Call -->
+<div class="flex flex-col gap-2 w-full">
+<div class="flex items-center gap-2 mb-1">
+<div class="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-[14px] text-primary" data-icon="terminal">terminal</span>
+</div>
+<span class="font-label-sm text-label-sm text-primary">System Action</span>
+</div>
+<div class="pl-8 w-full">
+<div class="border border-primary/20 bg-surface-container-lowest rounded-xl overflow-hidden shadow-[0_10px_30px_rgba(0,0,0,0.2)]">
+<div class="bg-surface-container-low px-4 py-2 border-b border-outline-variant/30 flex items-center gap-2">
+<span class="w-2.5 h-2.5 rounded-full bg-outline-variant/50"></span>
+<span class="w-2.5 h-2.5 rounded-full bg-outline-variant/50"></span>
+<span class="w-2.5 h-2.5 rounded-full bg-outline-variant/50"></span>
+<span class="font-label-sm text-label-sm text-outline ml-2">read_file</span>
+</div>
+<div class="p-4 data-mono text-sm text-on-surface">
+<span class="text-tertiary">cat</span> <span class="text-primary-fixed-dim">src/auth/service.ts</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Floating Footer Composer -->
+<div class="fixed bottom-16 md:bottom-8 left-0 w-full flex justify-center z-40 px-4 pointer-events-none">
+<div class="w-full max-w-3xl glass-panel rounded-[24px] p-2 flex flex-col gap-2 pointer-events-auto shadow-[0_20px_40px_rgba(0,0,0,0.4)]">
+<!-- Context Bar -->
+<div class="flex items-center gap-2 px-3 pt-2 pb-1 border-b border-outline-variant/30">
+<button class="flex items-center gap-1.5 px-2 py-1 rounded-full bg-surface-container hover:bg-surface-container-high transition-colors border border-outline-variant/50">
+<span class="material-symbols-outlined text-[14px] text-primary" data-icon="model_training">model_training</span>
+<span class="font-label-sm text-label-sm text-on-surface">GPT-4o</span>
+<span class="material-symbols-outlined text-[14px] text-outline" data-icon="arrow_drop_down">arrow_drop_down</span>
+</button>
+<div class="h-4 w-[1px] bg-outline-variant/50 mx-1"></div>
+<div class="flex gap-2">
+<button class="text-outline hover:text-on-surface transition-colors font-label-sm text-label-sm flex items-center gap-1">
+<span class="bg-surface-container-high rounded px-1 text-[10px]">@</span>
+                        Mention
+                    </button>
+<button class="text-outline hover:text-on-surface transition-colors font-label-sm text-label-sm flex items-center gap-1">
+<span class="bg-surface-container-high rounded px-1 text-[10px]">/</span>
+                        Command
+                    </button>
+</div>
+</div>
+<!-- Input Area -->
+<div class="flex items-end gap-2 p-2">
+<div class="flex-1 min-h-[44px] bg-surface-container-lowest rounded-[16px] border border-outline-variant/30 focus-within:border-primary/50 focus-within:shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)] transition-all flex items-center px-4 py-3">
+<textarea class="w-full bg-transparent border-none p-0 focus:ring-0 resize-none max-h-32 font-body-md text-body-md text-on-surface placeholder:text-outline-variant" oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'" placeholder="Message OpenCode..." rows="1"></textarea>
+</div>
+<button class="w-[44px] h-[44px] rounded-[16px] bg-gradient-to-b from-primary to-primary-container text-on-primary flex items-center justify-center hover:opacity-90 transition-opacity flex-shrink-0 shadow-[0_0_15px_rgba(75,142,255,0.3)]">
+<span class="material-symbols-outlined" data-icon="arrow_upward">arrow_upward</span>
+</button>
+</div>
+</div>
+</div>
+<!-- BottomNavBar JSON Anchor (Mobile Only) -->
+<nav class="fixed bottom-0 w-full z-50 h-16 bg-surface-container dark:bg-surface-container-lowest border-t border-outline-variant flex justify-around items-center px-4 md:hidden">
+<a class="flex flex-col items-center justify-center text-outline p-2 hover:text-on-surface transition-all active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-label-caps text-label-caps font-data-mono hidden">dashboard</span>
+</a>
+<a class="flex flex-col items-center justify-center text-primary border-t-2 border-primary pt-2 pb-2 hover:text-on-surface transition-all active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined" data-icon="terminal" style="font-variation-settings: 'FILL' 1;">terminal</span>
+<span class="font-label-caps text-label-caps font-data-mono hidden">terminal</span>
+</a>
+<a class="flex flex-col items-center justify-center text-outline p-2 hover:text-on-surface transition-all active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined" data-icon="vpn_key">vpn_key</span>
+<span class="font-label-caps text-label-caps font-data-mono hidden">vpn_key</span>
+</a>
+<a class="flex flex-col items-center justify-center text-outline p-2 hover:text-on-surface transition-all active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined" data-icon="receipt_long">receipt_long</span>
+<span class="font-label-caps text-label-caps font-data-mono hidden">receipt_long</span>
+</a>
+<a class="flex flex-col items-center justify-center text-outline p-2 hover:text-on-surface transition-all active:scale-95 duration-100" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-label-caps text-label-caps font-data-mono hidden">settings</span>
+</a>
+</nav>
+<script>
+        function toggleThinking() {
+            const content = document.getElementById('thinking-content');
+            const chevron = document.getElementById('thinking-chevron');
+            
+            if (content.style.display === 'none') {
+                content.style.display = 'block';
+                chevron.style.transform = 'rotate(0deg)';
+            } else {
+                content.style.display = 'none';
+                chevron.style.transform = 'rotate(-90deg)';
+            }
+        }
+    </script>
+</body></html>

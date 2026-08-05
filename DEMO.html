@@ -1,0 +1,1282 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenCode Remote — Demo Interattiva</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg: #0e0e10;
+    --surface-dim: #131314;
+    --surface-low: #1c1b1c;
+    --surface: #201f20;
+    --surface-high: #2a2a2b;
+    --on-surface: #e5e2e3;
+    --on-surface-variant: #c1c6d7;
+    --outline: #8b90a0;
+    --outline-variant: #414755;
+    --primary: #adc6ff;
+    --on-primary: #002e69;
+    --primary-container: #4b8eff;
+    --secondary: #c0c1ff;
+    --tertiary: #ddb7ff;
+    --error: #ffb4ab;
+    --green: #39D2C0;
+    --yellow: #fbbf24;
+    --border-subtle: rgba(255,255,255,0.04);
+    --border-med: rgba(255,255,255,0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #08080c;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    font-family: 'Inter', -apple-system, sans-serif;
+    padding: 20px;
+  }
+
+  /* ── iPhone ── */
+  .iphone {
+    position: relative;
+    width: 393px;
+    height: 852px;
+    background: var(--bg);
+    border-radius: 55px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 0 0 8px #1a1a22, 0 0 40px rgba(0,0,0,0.8), 0 30px 80px rgba(0,0,0,0.6);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .iphone-notch {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 160px; height: 34px; background: var(--bg);
+    border-radius: 0 0 20px 20px; z-index: 100;
+  }
+
+  .screen {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+
+  /* ── Status Bar ── */
+  .status-bar {
+    display: flex; justify-content: space-between;
+    padding: 14px 30px 6px;
+    font-size: 13px; font-weight: 600;
+    color: var(--on-surface);
+    z-index: 50;
+    position: relative;
+  }
+
+  /* ── Nav Bar ── */
+  .nav-bar {
+    display: flex; align-items: center;
+    padding: 8px 16px;
+    gap: 8px;
+    position: relative;
+    z-index: 50;
+  }
+  .nav-bar .back {
+    width: 32px; height: 32px; border-radius: 10px;
+    background: var(--surface); border: none;
+    color: var(--on-surface); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    transition: 0.15s;
+  }
+  .nav-bar .back:hover { background: var(--surface-high); }
+  .nav-bar .title {
+    font-size: 16px; font-weight: 600; color: var(--on-surface);
+    flex: 1; text-align: center;
+  }
+  .nav-bar .action {
+    width: 32px; height: 32px; border-radius: 10px;
+    background: transparent; border: none;
+    color: var(--primary); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px;
+  }
+
+  /* ── Scrollable Content ── */
+  .content {
+    flex: 1; overflow-y: auto;
+    padding: 8px 16px 100px;
+    scrollbar-width: none;
+  }
+  .content::-webkit-scrollbar { display: none; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface-low);
+    border-radius: 32px;
+    padding: 20px;
+    border: 1px solid var(--border-subtle);
+    margin-bottom: 12px;
+    transition: 0.15s;
+    cursor: pointer;
+  }
+  .card:active { transform: scale(0.98); }
+
+  .card-row {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .card-row .icon-circle {
+    width: 40px; height: 40px; border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .card-row .icon-circle.blue { background: rgba(173,198,255,0.1); color: var(--primary); }
+  .card-row .icon-circle.purple { background: rgba(221,183,255,0.1); color: var(--tertiary); }
+  .card-row .icon-circle.green { background: rgba(57,210,192,0.1); color: var(--green); }
+  .card-row .icon-circle.yellow { background: rgba(251,191,36,0.1); color: var(--yellow); }
+
+  .card-label { font-size: 15px; font-weight: 500; color: var(--on-surface); }
+  .card-sub { font-size: 12px; color: var(--on-surface-variant); margin-top: 2px; }
+
+  /* ── Section Header ── */
+  .section-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin: 16px 0 8px; padding: 0 4px;
+  }
+  .section-header h3 {
+    font-size: 15px; font-weight: 600; color: var(--on-surface);
+  }
+  .section-header .view-all {
+    font-size: 11px; font-weight: 600; color: var(--primary);
+    font-family: 'JetBrains Mono', monospace; letter-spacing: 1px;
+    cursor: pointer; text-transform: uppercase;
+    padding: 4px 8px; border-radius: 6px; transition: 0.15s;
+  }
+  .section-header .view-all:hover { background: rgba(173,198,255,0.08); }
+
+  /* ── Status Chip ── */
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 12px; border-radius: 999px;
+    font-size: 10px; font-weight: 700; font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  .chip-blue { background: rgba(173,198,255,0.12); color: var(--primary); border: 1px solid rgba(173,198,255,0.2); }
+  .chip-green { background: rgba(57,210,192,0.12); color: var(--green); border: 1px solid rgba(57,210,192,0.2); }
+  .chip-purple { background: rgba(221,183,255,0.12); color: var(--tertiary); border: 1px solid rgba(221,183,255,0.2); }
+  .chip-yellow { background: rgba(251,191,36,0.12); color: var(--yellow); border: 1px solid rgba(251,191,36,0.2); }
+  .chip-gray { background: rgba(139,144,160,0.12); color: var(--outline); border: 1px solid rgba(139,144,160,0.2); }
+
+  /* ── Session Card ── */
+  .session-card {
+    background: var(--surface-low);
+    border-radius: 40px;
+    padding: 24px;
+    border: 1px solid var(--border-subtle);
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+  .session-card:active { transform: scale(0.98); }
+  .session-card.thinking {
+    box-shadow: 0 0 32px rgba(221,183,255,0.15);
+  }
+  .session-card.blocked {
+    border-left: 3px solid var(--yellow);
+  }
+
+  .session-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 12px;
+  }
+  .session-title { font-size: 20px; font-weight: 600; color: var(--primary); }
+  .session-id { font-size: 10px; color: var(--outline); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+
+  .session-desc {
+    font-size: 14px; color: var(--on-surface-variant);
+    text-align: center; padding: 16px;
+    background: rgba(14,14,15,0.5); border-radius: 40px;
+    border: 1px solid rgba(255,255,255,0.04);
+    margin-bottom: 12px;
+  }
+  .session-footer {
+    display: flex; justify-content: space-between;
+    font-size: 10px; color: var(--outline); font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ── Permission Card ── */
+  .perm-card {
+    background: var(--surface-low);
+    border-radius: 32px; padding: 20px;
+    border: 1px solid var(--border-med);
+    margin-bottom: 12px;
+  }
+  .perm-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .perm-icon {
+    width: 40px; height: 40px; border-radius: 20px;
+    background: rgba(255,180,171,0.1); color: var(--error);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .perm-command {
+    font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    color: var(--error); padding: 12px;
+    background: rgba(14,14,15,0.5); border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.04);
+    margin-bottom: 12px;
+  }
+  .btn-allow {
+    width: 100%; padding: 14px; border-radius: 999px;
+    background: var(--primary); color: var(--on-primary);
+    font-size: 14px; font-weight: 700; border: none;
+    cursor: pointer; transition: 0.15s;
+    box-shadow: 0 4px 16px rgba(173,198,255,0.2);
+  }
+  .btn-allow:active { transform: scale(0.97); }
+  .btn-row { display: flex; gap: 8px; margin-top: 8px; }
+  .btn-outline {
+    flex: 1; padding: 10px; border-radius: 999px;
+    background: transparent; color: var(--on-surface-variant);
+    font-size: 13px; font-weight: 500; border: 1px solid var(--outline-variant);
+    cursor: pointer; transition: 0.15s;
+  }
+  .btn-outline:active { transform: scale(0.97); }
+  .btn-outline.deny { color: var(--error); }
+
+  /* ── Question Card ── */
+  .q-card {
+    background: var(--surface-low);
+    border-radius: 32px; padding: 16px;
+    border: 1px solid rgba(251,191,36,0.2);
+    margin-bottom: 12px;
+  }
+  .q-text { font-size: 14px; color: var(--on-surface); margin: 8px 0; }
+  .q-option {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; margin-bottom: 6px;
+    background: var(--surface-high); border-radius: 12px;
+    cursor: pointer; transition: 0.15s;
+  }
+  .q-option.selected { background: rgba(173,198,255,0.1); border: 1px solid rgba(173,198,255,0.3); }
+  .q-option .dot {
+    width: 18px; height: 18px; border-radius: 9px;
+    border: 2px solid var(--outline-variant); flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .q-option.selected .dot { border-color: var(--primary); background: var(--primary); }
+  .q-option.selected .dot::after { content: ''; width: 6px; height: 6px; border-radius: 3px; background: var(--on-primary); }
+  .q-btn-row { display: flex; justify-content: space-between; margin-top: 12px; }
+  .q-btn {
+    padding: 8px 20px; border-radius: 999px;
+    font-size: 13px; font-weight: 500; border: none;
+    cursor: pointer; transition: 0.15s;
+  }
+  .q-btn:active { transform: scale(0.97); }
+  .q-btn.primary {
+    background: linear-gradient(180deg, var(--primary), var(--primary-container));
+    color: var(--on-primary); box-shadow: 0 4px 12px rgba(173,198,255,0.3);
+  }
+
+  /* ── Timeline Message ── */
+  .msg { margin-bottom: 16px; }
+  .msg-header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .msg-avatar {
+    width: 24px; height: 24px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+  }
+  .msg-avatar.user { background: rgba(173,198,255,0.1); color: var(--primary); }
+  .msg-avatar.asst { background: rgba(221,183,255,0.1); color: var(--tertiary); }
+  .msg-role { font-size: 10px; color: var(--outline); font-family: 'JetBrains Mono', monospace; letter-spacing: 1px; }
+  .msg-bubble {
+    font-size: 14px; color: var(--on-surface);
+    padding: 12px 16px; background: var(--surface-high);
+    border-radius: 16px; border: 1px solid var(--border-subtle);
+  }
+  .msg-bubble.right { margin-left: 40px; }
+  .msg-bubble.left { margin-right: 40px; }
+
+  /* ── Thinking Bubble ── */
+  .think-bubble {
+    padding: 8px 12px; background: rgba(221,183,255,0.08);
+    border-radius: 12px; border: 1px solid rgba(221,183,255,0.15);
+    margin-bottom: 8px; cursor: pointer;
+  }
+  .think-header { display: flex; align-items: center; gap: 6px; }
+  .think-text { font-size: 12px; color: var(--on-surface-variant); margin-top: 6px; font-family: 'JetBrains Mono', monospace; display: none; }
+  .think-text.open { display: block; }
+
+  /* ── Composer ── */
+  .composer {
+    display: flex; gap: 8px; padding: 8px 12px;
+    background: var(--surface-dim); border-top: 1px solid var(--border-subtle);
+    position: absolute; bottom: 72px; left: 0; right: 0; z-index: 50;
+  }
+  .composer input {
+    flex: 1; padding: 10px 14px; border-radius: 16px;
+    background: rgba(14,14,15,0.5); border: 1px solid rgba(65,71,85,0.3);
+    color: var(--on-surface); font-size: 14px; outline: none;
+    font-family: 'Inter', sans-serif;
+  }
+  .composer input::placeholder { color: var(--outline); opacity: 0.5; }
+  .composer .send {
+    width: 44px; height: 44px; border-radius: 16px;
+    background: linear-gradient(180deg, var(--primary), var(--primary-container));
+    border: none; color: var(--on-primary); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; box-shadow: 0 4px 12px rgba(173,198,255,0.2);
+  }
+
+  /* ── Floating Tab Bar ── */
+  .tab-bar {
+    position: absolute; bottom: 8px; left: 16px; right: 16px;
+    height: 64px;
+    background: rgba(28,27,28,0.4);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 40px;
+    border: 1px solid var(--border-med);
+    display: flex; align-items: center;
+    padding: 0 8px;
+    z-index: 90;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .tab-item {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; gap: 2px;
+    padding: 6px 0;
+    border-radius: 12px;
+    cursor: pointer; transition: 0.15s;
+    border: none; background: transparent;
+  }
+  .tab-item .tab-icon {
+    width: 44px; height: 30px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    transition: 0.15s;
+  }
+  .tab-item.active .tab-icon { background: rgba(173,198,255,0.1); }
+  .tab-item .tab-label {
+    font-size: 9px; font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 1px; text-transform: uppercase;
+    transition: 0.15s;
+  }
+  .tab-item.active .tab-icon { color: var(--primary); }
+  .tab-item.active .tab-label { color: var(--primary); font-weight: 700; }
+  .tab-item:not(.active) .tab-icon { color: rgba(193,198,215,0.5); }
+  .tab-item:not(.active) .tab-label { color: rgba(193,198,215,0.5); font-weight: 400; }
+
+  /* ── Floating Modal / Sheet ── */
+  .modal-overlay {
+    position: absolute; inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 200;
+    display: none;
+    justify-content: center;
+    align-items: flex-end;
+    padding: 20px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-sheet {
+    background: var(--surface-low);
+    border-radius: 40px;
+    width: 100%;
+    max-height: 70%;
+    border: 1px solid var(--border-med);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .modal-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .modal-header h3 { font-size: 16px; color: var(--on-surface); }
+  .modal-close {
+    background: none; border: none; color: var(--primary);
+    font-size: 14px; font-weight: 500; cursor: pointer;
+  }
+  .modal-body { overflow-y: auto; padding: 12px 0; flex: 1; }
+
+  .modal-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px; cursor: pointer; transition: 0.1s;
+  }
+  .modal-item:hover { background: rgba(255,255,255,0.03); }
+  .modal-item .item-title { font-size: 14px; color: var(--on-surface); }
+  .modal-item .item-sub { font-size: 11px; color: var(--on-surface-variant); }
+  .modal-item .item-right { font-size: 11px; color: var(--outline); font-family: 'JetBrains Mono', monospace; }
+
+  /* ── Snackbar ── */
+  .snackbar {
+    position: absolute; bottom: 80px; left: 20px; right: 20px;
+    background: var(--surface-high); border-radius: 16px;
+    padding: 12px 18px; border: 1px solid var(--border-med);
+    display: none; align-items: center; gap: 8px;
+    z-index: 300;
+    animation: slideUp 0.3s ease;
+  }
+  .snackbar.open { display: flex; }
+  .snackbar .s-icon { width: 20px; height: 20px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 11px; }
+  .snackbar .s-text { font-size: 12px; color: var(--on-surface); flex: 1; }
+
+  @keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  /* ── Agent Row ── */
+  .agent-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; margin-bottom: 8px;
+    background: var(--surface-low); border-radius: 24px;
+    border: 1px solid var(--border-subtle);
+    cursor: pointer; transition: 0.15s;
+  }
+  .agent-row:active { transform: scale(0.98); }
+
+  /* ── Diff / Code ── */
+  .code-line {
+    display: flex; font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    padding: 2px 8px;
+  }
+  .code-line .ln { color: var(--outline); width: 32px; text-align: right; padding-right: 8px; flex-shrink: 0; }
+  .code-line.add { background: rgba(57,210,192,0.12); }
+  .code-line.add .prefix { color: var(--green); }
+  .code-line.del { background: rgba(255,180,171,0.12); }
+  .code-line.del .prefix { color: var(--error); }
+
+  /* ── Terminal ── */
+  .terminal-bg { background: #08080c; }
+  .term-line { font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 2px 16px; }
+  .term-line.cmd { color: var(--green); }
+  .term-line.out { color: #c8c8c8; }
+  .term-line.err { color: var(--error); }
+  .term-input-row {
+    display: flex; gap: 8px; padding: 8px 12px;
+    background: rgba(28,27,28,0.6);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border-subtle);
+    position: absolute; bottom: 72px; left: 0; right: 0;
+  }
+  .term-input-row input {
+    flex: 1; padding: 8px 12px; border-radius: 12px;
+    background: rgba(14,14,15,0.5); border: 1px solid var(--border-subtle);
+    color: #c8c8c8; font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; outline: none;
+  }
+
+  /* ── Toast notification ── */
+  .toast {
+    position: absolute; top: 60px; left: 16px; right: 16px;
+    background: rgba(57,210,192,0.15); border: 1px solid rgba(57,210,192,0.3);
+    border-radius: 16px; padding: 12px 16px;
+    display: none; align-items: center; gap: 8px;
+    backdrop-filter: blur(10px);
+    z-index: 300;
+    animation: slideDown 0.3s ease;
+  }
+  .toast.open { display: flex; }
+  .toast .t-icon { color: var(--green); font-size: 16px; }
+  .toast .t-text { font-size: 13px; color: var(--on-surface); }
+
+  @keyframes slideDown {
+    from { transform: translateY(-20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  /* ── Dot loading animation ── */
+  .dots { display: flex; gap: 6px; align-items: center; padding: 12px; justify-content: center; }
+  .dot-pulse {
+    width: 8px; height: 8px; border-radius: 4px;
+    background: var(--tertiary);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .dot-pulse:nth-child(2) { animation-delay: 0.2s; }
+  .dot-pulse:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.3; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.2); }
+  }
+
+  .label-sm {
+    font-size: 10px; font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase; letter-spacing: 1px; font-weight: 600;
+  }
+
+  .flex { display: flex; }
+  .flex-1 { flex: 1; }
+  .gap-8 { gap: 8px; }
+  .gap-4 { gap: 4px; }
+  .items-center { align-items: center; }
+  .justify-between { justify-content: space-between; }
+  .mt-8 { margin-top: 8px; }
+  .mb-8 { margin-bottom: 8px; }
+  .text-center { text-align: center; }
+  .text-right { text-align: right; }
+  .text-outline { color: var(--outline); }
+</style>
+</head>
+<body>
+
+<div class="iphone" id="phone">
+  <div class="iphone-notch"></div>
+
+  <!-- TOAST -->
+  <div class="toast" id="toast">
+    <span class="t-icon">✓</span>
+    <span class="t-text" id="toast-text">Connesso</span>
+  </div>
+
+  <!-- ROOT SCREEN -->
+  <div class="screen" id="screen-root">
+    <!-- STATUS BAR + NAV -->
+    <div class="status-bar">
+      <span>9:41</span>
+      <span style="display:flex;gap:4px;align-items:center">
+        <span style="font-size:12px;opacity:0.6">●●●●○</span>
+        <span style="font-size:16px">WiFi</span>
+        <span style="font-size:14px;font-weight:700">􀊨􀊰</span>
+      </span>
+    </div>
+    <div class="nav-bar">
+      <div></div>
+      <div class="title" id="screen-title">Dashboard</div>
+      <button class="action" onclick="showToast('Disconnesso dal server')">⏻</button>
+    </div>
+
+    <!-- DYNAMIC CONTENT -->
+    <div class="content" id="screen-content"></div>
+
+    <!-- COMPOSER (hidden by default) -->
+    <div class="composer" id="composer" style="display:none">
+      <input placeholder="Scrivi un messaggio... (usa @ per agenti)" id="msg-input">
+      <button class="send" onclick="sendMessage()">↑</button>
+    </div>
+
+    <!-- TAB BAR -->
+    <div class="tab-bar" id="tab-bar">
+      <button class="tab-item active" data-tab="dash" onclick="switchTab('dash')">
+        <div class="tab-icon">▦</div>
+        <div class="tab-label">Dash</div>
+      </button>
+      <button class="tab-item" data-tab="sessions" onclick="switchTab('sessions')">
+        <div class="tab-icon">💬</div>
+        <div class="tab-label">Sessions</div>
+      </button>
+      <button class="tab-item" data-tab="terminal" onclick="switchTab('terminal')">
+        <div class="tab-icon">⌨</div>
+        <div class="tab-label">Terminal</div>
+      </button>
+      <button class="tab-item" data-tab="settings" onclick="switchTab('settings')">
+        <div class="tab-icon">⚙</div>
+        <div class="tab-label">Settings</div>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── STATE ──
+  let currentTab = 'dash';
+  let currentView = 'dashboard'; // dashboard, session-detail, agents, providers, etc.
+  let selectedSessionId = null;
+  let thinkingOpen = false;
+  let toolCallOpen = {};
+  let currentMessageCount = 0;
+
+  // ── SAMPLE DATA ──
+  const sessions = [
+    { id: 'ses_001', title: 'Refactoring DesignSystem', status: 'thinking', desc: 'Aggiornamento dei token colore per il nuovo tema scuro', agent: 'orchestrator', model: 'gpt-4o', msgs: 14, ago: '2 min' },
+    { id: 'ses_002', title: 'Debug API Connection', status: 'blocked', desc: 'Richiesto permesso per eseguire comando bash: "curl -X GET https://api.github.com"', agent: 'error-analyst', model: 'claude-3.5', msgs: 8, ago: '15 min' },
+    { id: 'ses_003', title: 'Implementazione login', status: 'executing', desc: 'Aggiunta autenticazione biometrica e gestione token JWT', agent: 'general', model: 'gpt-4o', msgs: 23, ago: '1h' },
+    { id: 'ses_004', title: 'Review PR #42', status: 'idle', desc: 'Revisione del codice per la branch feature/notifications', agent: 'explore', model: 'claude-3-haiku', msgs: 5, ago: '3h' },
+  ];
+
+  const agents = [
+    { id: 'orchestrator', name: 'Orchestrator', mode: 'Primary', color: 'blue' },
+    { id: 'error-analyst', name: 'Error Analyst', mode: 'Subagent', color: 'purple' },
+    { id: 'general', name: 'General', mode: 'Subagent', color: 'green' },
+    { id: 'explore', name: 'Explore', mode: 'Subagent', color: 'orange' },
+    { id: 'session-scribe', name: 'Session Scribe', mode: 'Subagent', color: 'purple' },
+    { id: 'agent-architect', name: 'Agent Architect', mode: 'Subagent', color: 'yellow' },
+  ];
+
+  const serverInfo = { name: 'MacBook Pro', url: 'opencode.local:4096', version: '2.4.1', status: 'healthy' };
+
+  // ── NAVIGATION ──
+  function navigate(view, params, title) {
+    currentView = view;
+    document.getElementById('screen-title').textContent = title || 'OpenCode';
+
+    const composer = document.getElementById('composer');
+    composer.style.display = (view === 'session-detail') ? 'flex' : 'none';
+
+    render(view, params);
+  }
+
+  function goBack() {
+    if (currentView === 'session-detail') {
+      navigate('dashboard', null, 'Dashboard');
+      return;
+    }
+    if (currentView === 'agent-detail') {
+      navigate('agents', null, 'Agenti');
+      return;
+    }
+    switchTab(currentTab);
+  }
+
+  // ── SWITCH TAB ──
+  function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.tab-item').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    document.getElementById('composer').style.display = 'none';
+
+    switch (tab) {
+      case 'dash': navigate('dashboard', null, 'Dashboard'); break;
+      case 'sessions': navigate('sessions-list', null, 'Sessioni'); break;
+      case 'terminal': navigate('terminal', null, 'Terminal'); break;
+      case 'settings': navigate('settings', null, 'Impostazioni'); break;
+    }
+  }
+
+  // ── TOAST ──
+  function showToast(text, icon) {
+    const t = document.getElementById('toast');
+    document.getElementById('toast-text').textContent = text;
+    t.classList.add('open');
+    setTimeout(() => t.classList.remove('open'), 2000);
+  }
+
+  // ── SNACKBAR ──
+  function showSnackbar(text, type) {
+    // Use toast for now
+    showToast(text);
+  }
+
+  // ── RENDER ENGINE ──
+  function render(view, params) {
+    const el = document.getElementById('screen-content');
+    switch (view) {
+      case 'dashboard': renderDashboard(el); break;
+      case 'sessions-list': renderSessionsList(el); break;
+      case 'session-detail': renderSessionDetail(el, params); break;
+      case 'agents': renderAgents(el); break;
+      case 'agent-detail': renderAgentDetail(el, params); break;
+      case 'providers': renderProviders(el); break;
+      case 'terminal': renderTerminal(el); break;
+      case 'settings': renderSettings(el); break;
+      case 'permissions': renderPermissions(el); break;
+      default: renderDashboard(el);
+    }
+  }
+
+  // ── DASHBOARD ──
+  function renderDashboard(el) {
+    el.innerHTML = `
+      <!-- Server Card -->
+      <div class="card" onclick="showToast('Server info: ${serverInfo.url}')">
+        <div class="flex items-center gap-8">
+          <div class="icon-circle blue">⊞</div>
+          <div class="flex-1">
+            <div class="card-label">Connesso</div>
+            <div class="card-sub">${serverInfo.url}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-size:10px;color:var(--outline)">v${serverInfo.version}</div>
+            <span class="chip chip-green">Connected</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Project -->
+      <div class="card" onclick="showToast('Progetto: opencode-remote')">
+        <div class="section-header" style="margin-top:0"><h3>Progetto attivo</h3></div>
+        <div class="flex items-center gap-8">
+          <div class="icon-circle blue">📁</div>
+          <div class="card-label">opencode-remote-ios</div>
+        </div>
+        <div class="flex gap-8 items-center mt-8" style="font-size:12px;color:var(--on-surface-variant)">
+          <span style="color:var(--green)"> main</span>
+          <span style="color:var(--yellow)">● modified</span>
+          <span class="flex-1"></span>
+          <span style="color:var(--green)">↑3</span>
+        </div>
+      </div>
+
+      <!-- Active Sessions -->
+      <div class="section-header">
+        <h3>Sessioni attive</h3>
+        <span class="view-all" onclick="switchTab('sessions')">VIEW ALL</span>
+      </div>
+
+      ${sessions.map(s => `
+        <div class="session-card ${s.status === 'thinking' ? 'thinking' : ''} ${s.status === 'blocked' ? 'blocked' : ''}"
+             onclick="openSession('${s.id}')">
+          <div class="session-header">
+            <div>
+              <div class="session-title">${s.title}</div>
+              <div class="session-id">${s.id} · ${s.ago}</div>
+            </div>
+            <span class="chip ${s.status === 'thinking' ? 'chip-purple' : s.status === 'blocked' ? 'chip-yellow' : s.status === 'executing' ? 'chip-blue' : 'chip-gray'}">
+              ${s.status.toUpperCase()}
+            </span>
+          </div>
+          <div class="session-desc">${s.desc}</div>
+          <div class="session-footer">
+            <span>@${s.agent}</span>
+            <span>${s.model}</span>
+            <span>${s.msgs} msg</span>
+          </div>
+        </div>
+      `).join('')}
+
+      <!-- Pending -->
+      <div class="card" style="border-color:rgba(251,191,36,0.3)" onclick="navigate('permissions', null, 'Permessi')">
+        <div class="flex items-center gap-8">
+          <div class="icon-circle yellow">🛡</div>
+          <div class="flex-1">
+            <div class="card-label">In attesa</div>
+            <div class="card-sub">1 permesso · 0 domande</div>
+          </div>
+          <span class="chip chip-yellow">1 pending</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── SESSIONS LIST ──
+  function renderSessionsList(el) {
+    el.innerHTML = `
+      <div style="padding:4px 0;display:flex;gap:8px;align-items:center">
+        <h3 style="font-size:16px;font-weight:600;color:var(--on-surface);flex:1">Sessioni</h3>
+        <button onclick="newSession()" style="background:none;border:none;color:var(--primary);font-size:22px;cursor:pointer;padding:4px 8px">+</button>
+      </div>
+      ${sessions.map(s => `
+        <div class="session-card ${s.status === 'thinking' ? 'thinking' : ''} ${s.status === 'blocked' ? 'blocked' : ''}"
+             onclick="openSession('${s.id}')" style="padding:16px 20px;border-radius:32px">
+          <div class="flex items-center gap-8">
+            <span class="chip ${s.status === 'thinking' ? 'chip-purple' : s.status === 'blocked' ? 'chip-yellow' : s.status === 'executing' ? 'chip-blue' : 'chip-gray'}" style="font-size:8px;padding:2px 8px">
+              ${s.status === 'thinking' ? '◉' : s.status === 'blocked' ? '◉' : s.status === 'executing' ? '◉' : '○'}
+            </span>
+            <div class="flex-1">
+              <div style="font-size:14px;color:var(--on-surface);font-weight:500">${s.title}</div>
+              <div class="flex gap-4 items-center" style="font-size:10px;color:var(--on-surface-variant);margin-top:2px">
+                <span class="chip ${s.status === 'thinking' ? 'chip-purple' : s.status === 'blocked' ? 'chip-yellow' : s.status === 'executing' ? 'chip-blue' : 'chip-gray'}" style="font-size:8px;padding:1px 6px">${s.status.toUpperCase()}</span>
+                <span>${s.msgs} msg</span>
+              </div>
+            </div>
+            <span style="color:var(--outline);opacity:0.4;font-size:10px">›</span>
+          </div>
+        </div>
+      `).join('')}
+    `;
+  }
+
+  let messageCount = 0;
+  const messageLog = [];
+
+  // ── OPEN SESSION ──
+  function openSession(id) {
+    const s = sessions.find(x => x.id === id);
+    if (!s) return;
+    selectedSessionId = id;
+    messageCount = s.msgs;
+    messageLog.length = 0;
+    // Add sample messages
+    messageLog.push({ role: 'user', text: 'Aggiorna i colori del tema scuro' });
+    messageLog.push({ role: 'assistant', text: 'Ho analizzato la palette attuale. Ecco i nuovi valori per il tema scuro Obsidian Flux.' });
+    if (s.status === 'thinking') {
+      messageLog.push({ role: 'assistant', type: 'thinking', text: 'Sto esaminando la palette colori... I colori attuali usano #1c1b1c per le superfici. Dovrei aggiornare primary a #adc6ff per migliorare il contrasto.' });
+    }
+    if (s.status === 'blocked') {
+      messageLog.push({ role: 'assistant', type: 'tool_call', text: 'bash', args: ['curl -X GET https://api.github.com'] });
+    }
+    messageLog.push({ role: 'assistant', text: 'Vuoi che applichi queste modifiche?' });
+
+    navigate('session-detail', s, s.title);
+  }
+
+  // ── SESSION DETAIL ──
+  function renderSessionDetail(el, session) {
+    if (!session) { el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--outline)">Sessione non trovata</div>'; return; }
+
+    const s = session;
+    let html = `
+      <!-- Status Bar -->
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 4px;margin-bottom:8px">
+        <span class="chip ${s.status === 'thinking' ? 'chip-purple' : s.status === 'blocked' ? 'chip-yellow' : s.status === 'executing' ? 'chip-blue' : 'chip-gray'}">
+          ${s.status.toUpperCase()}
+        </span>
+        <span style="font-size:11px;color:var(--outline)">${s.msgs} msg · @${s.agent} · ${s.model}</span>
+        <div class="flex-1"></div>
+        <!-- Menu trigger -->
+        <button onclick="showSessionMenu()" style="background:none;border:none;color:var(--on-surface-variant);font-size:20px;cursor:pointer;padding:4px">⋯</button>
+      </div>
+    `;
+
+    // Messages
+    for (const m of messageLog) {
+      if (m.type === 'thinking') {
+        html += `
+          <div class="think-bubble" onclick="toggleThinking(this)">
+            <div class="think-header">
+              <span style="color:var(--tertiary)">🧠</span>
+              <span style="font-size:12px;color:var(--tertiary)">Thinking</span>
+              <span class="flex-1"></span>
+              <span style="font-size:10px;color:var(--outline)">▼</span>
+            </div>
+            <div class="think-text">${m.text}</div>
+          </div>`;
+      } else if (m.type === 'tool_call') {
+        const tcId = Math.random().toString(36).slice(2,6);
+        html += `
+          <div class="think-bubble" style="background:rgba(57,210,192,0.06);border-color:rgba(57,210,192,0.12)" onclick="toggleToolCall(this, '${tcId}')">
+            <div class="think-header">
+              <span style="color:var(--green)">⌨</span>
+              <span style="font-size:12px;color:var(--green)">${m.text}</span>
+              <span class="flex-1"></span>
+              <span style="font-size:10px;color:var(--outline)">▼</span>
+            </div>
+            <div class="think-text" id="tc-${tcId}">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--on-surface-variant);padding:8px;background:rgba(14,14,15,0.5);border-radius:8px;margin-top:4px">
+                ${m.args ? m.args.map(a => `<div>command: <span style="color:var(--green)">${a}</span></div>`).join('') : '<div>command: <span style="color:var(--green)">curl -X GET https://api.github.com</span></div>'}
+              </div>
+            </div>
+          </div>`;
+      } else {
+        const isUser = m.role === 'user';
+        html += `
+          <div class="msg" style="text-align:${isUser ? 'right' : 'left'}">
+            <div class="msg-header" style="flex-direction:${isUser ? 'row-reverse' : 'row'}">
+              <div class="msg-avatar ${isUser ? 'user' : 'asst'}">${isUser ? '👤' : '🧠'}</div>
+              <span class="msg-role">${isUser ? 'YOU' : 'ASSISTANT'}</span>
+            </div>
+            <div class="msg-bubble ${isUser ? 'right' : 'left'}" style="text-align:left">${m.text}</div>
+          </div>`;
+      }
+    }
+
+    // If thinking, show dots
+    if (s.status === 'thinking') {
+      html += `<div class="dots"><div class="dot-pulse"></div><div class="dot-pulse"></div><div class="dot-pulse"></div></div>`;
+    }
+
+    // If blocked, show permission card
+    if (s.status === 'blocked') {
+      html += `
+        <div class="perm-card">
+          <div class="perm-header">
+            <div class="perm-icon">⌨</div>
+            <div>
+              <div style="font-size:15px;font-weight:500;color:var(--on-surface)">Execute Command</div>
+              <div style="font-size:11px;color:var(--on-surface-variant)">bash</div>
+            </div>
+            <div class="flex-1"></div>
+            <span class="chip chip-blue">BASH</span>
+          </div>
+          <div class="perm-command">curl -X GET https://api.github.com</div>
+          <button class="btn-allow" onclick="allowCommand()">Allow Once</button>
+          <div class="btn-row">
+            <button class="btn-outline" onclick="showToast('Permesso concesso permanentemente')">Always Allow</button>
+            <button class="btn-outline deny" onclick="denyCommand()">Deny</button>
+          </div>
+        </div>`;
+    }
+
+    // If has question
+    if (messageLog.length > 2 && s.status !== 'blocked') {
+      html += `
+        <div class="q-card">
+          <div class="flex items-center gap-8" style="margin-bottom:8px">
+            <div class="icon-circle yellow" style="width:28px;height:28px">?</div>
+            <span style="font-size:13px;color:var(--on-surface)">Domanda</span>
+          </div>
+          <div class="q-text">Vuoi che applichi le modifiche al DesignSystem.swift?</div>
+          <div class="q-option" onclick="selectOption(this)"><div class="dot"></div> Sì, applica tutte le modifiche</div>
+          <div class="q-option" onclick="selectOption(this)"><div class="dot"></div> Solo i colori primari</div>
+          <div class="q-option" onclick="selectOption(this)"><div class="dot"></div> No, tieni la palette corrente</div>
+          <div class="q-btn-row">
+            <button class="q-btn" style="color:var(--on-surface-variant);background:var(--surface-high)" onclick="declineQuestion()">Rifiuta</button>
+            <button class="q-btn primary" onclick="answerQuestion()">Rispondi</button>
+          </div>
+        </div>`;
+    }
+
+    el.innerHTML = html;
+  }
+
+  // ── SESSION MENU ──
+  function showSessionMenu() {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay open';
+    overlay.id = 'session-menu';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+      <div class="modal-sheet" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3>Azioni sessione</h3>
+          <button class="modal-close" onclick="document.getElementById('session-menu').remove()">Chiudi</button>
+        </div>
+        <div class="modal-body">
+          ${[
+            ['Cambia agente', 'Seleziona un agente diverso', 'person', () => showAgentPicker()],
+            ['Cambia modello', 'Imposta un modello diverso', 'cpu', () => showModelPicker()],
+            ['Fork', 'Crea un ramo della sessione', 'arrow.triangle.branch', () => { showToast('Sessione duplicata'); document.getElementById('session-menu').remove(); }],
+            ['Interrompi', 'Ferma esecuzione corrente', 'stop', () => { showToast('Sessione interrotta'); document.getElementById('session-menu').remove(); }],
+            ['Vedi modifiche', 'Mostra diff dei file', 'doc.text.diff', () => { showToast('Diff caricato'); document.getElementById('session-menu').remove(); }],
+            ['Riassumi', 'Riassumi conversazione', 'text.quote', () => { showToast('Richiesto riassunto'); document.getElementById('session-menu').remove(); }],
+          ].map(([title, desc, icon, action]) => `
+            <div class="modal-item" onclick="(${action.toString()})()">
+              <div>
+                <div class="item-title">${title}</div>
+                <div class="item-sub">${desc}</div>
+              </div>
+              <span style="color:var(--outline);opacity:0.5">${icon === 'person' ? '👤' : icon === 'cpu' ? '💻' : icon === 'arrow.triangle.branch' ? '🔀' : icon === 'stop' ? '⏹' : icon === 'doc.text.diff' ? '📝' : '📄'}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+    document.getElementById('phone').appendChild(overlay);
+  }
+
+  function showAgentPicker() {
+    document.getElementById('session-menu').remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay open';
+    overlay.id = 'agent-picker';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+      <div class="modal-sheet" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3>Seleziona agente</h3>
+          <button class="modal-close" onclick="document.getElementById('agent-picker').remove()">Chiudi</button>
+        </div>
+        <div class="modal-body">
+          ${agents.map(a => `
+            <div class="modal-item" onclick="changeAgent('${a.id}')">
+              <div>
+                <div class="item-title">${a.name}</div>
+                <div class="item-sub">${a.mode}</div>
+              </div>
+              <span class="item-right">${a.model ? a.model : '—'}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+    document.getElementById('phone').appendChild(overlay);
+  }
+
+  function showModelPicker() {
+    document.getElementById('session-menu').remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay open';
+    overlay.id = 'model-picker';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+      <div class="modal-sheet" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3>Cambia modello</h3>
+          <button class="modal-close" onclick="document.getElementById('model-picker').remove()">Chiudi</button>
+        </div>
+        <div class="modal-body" style="padding:12px 20px">
+          <input placeholder="Inserisci Model ID (es. gpt-4o)" style="width:100%;padding:12px 14px;border-radius:12px;background:rgba(14,14,15,0.5);border:1px solid var(--border-subtle);color:var(--on-surface);font-family:'JetBrains Mono',monospace;font-size:13px;outline:none"
+                 onkeydown="if(event.key==='Enter'){showToast('Modello impostato: '+this.value);document.getElementById('model-picker').remove()}">
+        </div>
+      </div>
+    `;
+    document.getElementById('phone').appendChild(overlay);
+  }
+
+  function changeAgent(id) {
+    document.getElementById('agent-picker').remove();
+    showToast(`Agente cambiato: ${id}`);
+  }
+
+  // ── QUESTION ACTIONS ──
+  function selectOption(el) {
+    document.querySelectorAll('.q-option').forEach(o => o.classList.remove('selected'));
+    el.classList.add('selected');
+  }
+
+  function answerQuestion() {
+    const selected = document.querySelector('.q-option.selected');
+    const answer = selected ? selected.textContent.trim() : 'Sì';
+    showToast(`Risposta inviata: "${answer}"`);
+    // Remove question card
+    const q = document.querySelector('.q-card');
+    if (q) q.remove();
+  }
+
+  function declineQuestion() {
+    showToast('Domanda rifiutata');
+    const q = document.querySelector('.q-card');
+    if (q) q.remove();
+  }
+
+  // ── PERMISSION ACTIONS ──
+  function allowCommand() {
+    showToast('✅ Comando autorizzato');
+    const perm = document.querySelector('.perm-card');
+    if (perm) perm.remove();
+  }
+
+  function denyCommand() {
+    showToast('❌ Comando negato');
+    const perm = document.querySelector('.perm-card');
+    if (perm) perm.remove();
+  }
+
+  // ── TOGGLE THINKING / TOOL CALL ──
+  function toggleThinking(el) {
+    const t = el.querySelector('.think-text');
+    t.classList.toggle('open');
+  }
+
+  function toggleToolCall(el, id) {
+    const t = document.getElementById('tc-' + id);
+    if (t) t.classList.toggle('open');
+  }
+
+  // ── SEND MESSAGE ──
+  function sendMessage() {
+    const input = document.getElementById('msg-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+
+    messageLog.push({ role: 'user', text });
+    const s = sessions.find(x => x.id === selectedSessionId);
+    if (s) {
+      s.msgs++;
+      openSession(selectedSessionId);
+      showToast('Messaggio inviato');
+    }
+  }
+
+  // ── NEW SESSION ──
+  function newSession() {
+    const count = sessions.length + 1;
+    sessions.unshift({
+      id: `ses_00${count}`,
+      title: `Nuova sessione ${count}`,
+      status: 'idle',
+      desc: 'Sessione vuota — scrivi un messaggio per iniziare',
+      agent: 'orchestrator',
+      model: 'gpt-4o',
+      msgs: 0,
+      ago: 'ora'
+    });
+    showToast('✅ Nuova sessione creata');
+    switchTab('sessions');
+  }
+
+  // ── AGENTS ──
+  function renderAgents(el) {
+    const primary = agents.filter(a => a.mode === 'Primary');
+    const subs = agents.filter(a => a.mode !== 'Primary');
+    el.innerHTML = `
+      <div style="padding:4px 0;margin-bottom:8px">
+        <div class="label-sm" style="color:var(--outline);margin-bottom:8px">Agenti primari</div>
+        ${primary.map(a => agentRow(a)).join('')}
+      </div>
+      <div>
+        <div class="label-sm" style="color:var(--outline);margin-bottom:8px">Sotto-agenti</div>
+        ${subs.map(a => agentRow(a)).join('')}
+      </div>
+    `;
+  }
+
+  function agentRow(a) {
+    const c = a.color === 'blue' ? 'var(--primary)' : a.color === 'purple' ? 'var(--tertiary)' : a.color === 'green' ? 'var(--green)' : a.color === 'orange' ? 'var(--yellow)' : 'var(--secondary)';
+    return `
+      <div class="agent-row" onclick="navigate('agent-detail', '${a.id}', '${a.name}')">
+        <div style="width:36px;height:36px;border-radius:18px;background:${c}22;display:flex;align-items:center;justify-content:center;color:${c};font-size:14px">👤</div>
+        <div class="flex-1">
+          <div style="font-size:14px;color:var(--on-surface)">${a.name}</div>
+          <div style="font-size:11px;color:var(--on-surface-variant)">${a.mode}</div>
+        </div>
+        <span class="chip chip-gray" style="font-size:8px;padding:2px 8px">${a.mode.toUpperCase()}</span>
+        <span style="color:var(--outline);opacity:0.4;font-size:10px">›</span>
+      </div>
+    `;
+  }
+
+  function renderAgentDetail(el, id) {
+    const a = agents.find(x => x.id === id);
+    el.innerHTML = `
+      <div class="card text-center" style="padding:32px 20px">
+        <div style="width:64px;height:64px;border-radius:32px;background:rgba(173,198,255,0.15);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:28px">👤</div>
+        <div style="font-size:20px;font-weight:600;color:var(--on-surface)">${a ? a.name : 'Agent'}</div>
+        <div style="font-size:13px;color:var(--on-surface-variant);margin-top:4px">${a ? a.mode : ''}</div>
+        <div style="margin-top:12px;display:flex;gap:8px;justify-content:center">
+          <span class="chip chip-blue">PRIMARY</span>
+          <span class="chip chip-gray">gpt-4o</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-header" style="margin-top:0"><h3>Configurazione</h3></div>
+        <div class="flex justify-between" style="padding:6px 0;font-size:13px"><span style="color:var(--on-surface-variant)">Temperatura</span><span style="color:var(--on-surface)">0.7</span></div>
+        <div class="flex justify-between" style="padding:6px 0;font-size:13px"><span style="color:var(--on-surface-variant)">Top P</span><span style="color:var(--on-surface)">0.95</span></div>
+        <div class="flex justify-between" style="padding:6px 0;font-size:13px"><span style="color:var(--on-surface-variant)">Step massimi</span><span style="color:var(--on-surface)">25</span></div>
+      </div>
+      <button onclick="showToast('Sessione creata con ${a ? a.name : 'agent'}')" style="width:100%;padding:14px;border-radius:999px;background:var(--primary);color:var(--on-primary);font-size:14px;font-weight:700;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(173,198,255,0.2)">Usa questo agente</button>
+    `;
+  }
+
+  // ── PROVIDERS ──
+  function renderProviders(el) {
+    el.innerHTML = `
+      <div class="label-sm" style="color:var(--outline);margin-bottom:8px">Provider connessi</div>
+      ${['OpenAI', 'Anthropic'].map(p => `
+        <div class="agent-row">
+          <div style="width:36px;height:36px;border-radius:18px;background:rgba(57,210,192,0.1);display:flex;align-items:center;justify-content:center;color:var(--green);font-size:14px">✓</div>
+          <div class="flex-1">
+            <div style="font-size:14px;color:var(--on-surface)">${p}</div>
+            <div style="font-size:11px;color:var(--on-surface-variant)">${p.toLowerCase()}.com · 24 modelli</div>
+          </div>
+        </div>
+      `).join('')}
+      <div class="label-sm" style="color:var(--outline);margin:16px 0 8px">Provider disponibili</div>
+      ${['Ollama', 'Groq', 'Together AI'].map(p => `
+        <div class="agent-row" onclick="showToast('Connessione a ${p}')">
+          <div style="width:36px;height:36px;border-radius:18px;background:rgba(139,144,160,0.1);display:flex;align-items:center;justify-content:center;color:var(--outline);font-size:14px">○</div>
+          <div class="flex-1">
+            <div style="font-size:14px;color:var(--on-surface)">${p}</div>
+            <div style="font-size:11px;color:var(--on-surface-variant)">${p.toLowerCase().replace(/\s/g,'')}.com</div>
+          </div>
+          <span style="color:var(--outline);opacity:0.4;font-size:10px">›</span>
+        </div>
+      `).join('')}
+      <div style="text-align:center;margin-top:12px">
+        <button onclick="showToast('Form provider personalizzato')" style="background:none;border:none;color:var(--primary);font-size:13px;cursor:pointer">+ Aggiungi provider personalizzato</button>
+      </div>
+    `;
+  }
+
+  // ── TERMINAL ──
+  let termHistory = [];
+  function renderTerminal(el) {
+    el.innerHTML = `
+      <div class="terminal-bg" style="flex:1;display:flex;flex-direction:column;height:100%;border-radius:0">
+        <div class="flex items-center" style="padding:8px 16px;background:rgba(28,27,28,0.6);backdrop-filter:blur(20px)">
+          <span style="font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--outline);letter-spacing:1px">⌨ TERMINAL</span>
+          <span class="flex-1"></span>
+          <button onclick="showToast('Cronologia: ${termHistory.length} comandi')" style="background:none;border:none;color:var(--on-surface-variant);font-size:14px;cursor:pointer">🕐</button>
+        </div>
+        <div id="term-output" style="flex:1;overflow-y:auto;padding:8px 0;font-family:'JetBrains Mono',monospace;font-size:12px;background:#08080c">
+          <div class="term-line out">OpenCodeRemote Terminal v1.0</div>
+          <div class="term-line out">Type a command and press Send to execute.</div>
+          ${termHistory.map(c => `<div class="term-line cmd">$ ${c}</div>`).join('')}
+        </div>
+        <div class="term-input-row">
+          <input placeholder="Type a command..." id="term-input" onkeydown="if(event.key==='Enter')executeTermCommand()">
+          <button class="send" onclick="executeTermCommand()" style="width:36px;height:36px;font-size:12px">↵</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function executeTermCommand() {
+    const input = document.getElementById('term-input');
+    const cmd = input.value.trim();
+    if (!cmd) return;
+    input.value = '';
+    termHistory.push(cmd);
+    const out = document.getElementById('term-output');
+    out.innerHTML += `<div class="term-line cmd">$ ${cmd}</div>`;
+    // Simulate output
+    setTimeout(() => {
+      if (cmd === 'ls') {
+        out.innerHTML += `<div class="term-line out">Sources/<br>Package.swift<br>README.md<br>.gitignore</div>`;
+      } else if (cmd === 'swift build') {
+        out.innerHTML += `<div class="term-line out">Build complete! (2.48s)</div>`;
+      } else if (cmd.startsWith('cd ')) {
+        out.innerHTML += `<div class="term-line out">${cmd.replace('cd ', '→ ')}</div>`;
+      } else {
+        out.innerHTML += `<div class="term-line out">Command executed: ${cmd}</div>`;
+      }
+      out.scrollTop = out.scrollHeight;
+    }, 300);
+    out.scrollTop = out.scrollHeight;
+  }
+
+  // ── SETTINGS ──
+  function renderSettings(el) {
+    el.innerHTML = `
+      <div class="card" style="cursor:default">
+        <div class="flex items-center gap-8">
+          <div class="icon-circle blue">⊞</div>
+          <div class="flex-1">
+            <div class="card-label">${serverInfo.name}</div>
+            <div class="card-sub">${serverInfo.url}</div>
+          </div>
+          <span class="chip chip-green">v${serverInfo.version}</span>
+        </div>
+        <div class="flex justify-between mt-8" style="font-size:13px">
+          <span style="color:var(--on-surface-variant)">Stato</span>
+          <span class="chip chip-green">HEALTHY</span>
+        </div>
+        <button onclick="showToast('Disconnessione in corso...')" style="margin-top:12px;width:100%;padding:10px;border-radius:999px;background:rgba(255,180,171,0.1);color:var(--error);border:none;font-size:13px;font-weight:500;cursor:pointer">Disconnetti</button>
+      </div>
+
+      <div class="card" style="cursor:default">
+        <div class="section-header" style="margin-top:0"><h3>Sicurezza</h3></div>
+        <div class="flex items-center justify-between" style="padding:6px 0">
+          <span style="font-size:13px;color:var(--on-surface)">Face ID</span>
+          <span style="width:44px;height:24px;border-radius:12px;background:var(--primary);display:inline-block;position:relative;cursor:pointer" onclick="showToast('Face ID '+(this.style.background=== 'var(--primary)' ? 'disabilitato' : 'abilitato'))">
+            <span style="width:20px;height:20px;border-radius:10px;background:white;position:absolute;top:2px;right:2px"></span>
+          </span>
+        </div>
+        <div class="flex items-center justify-between" style="padding:6px 0">
+          <span style="font-size:13px;color:var(--on-surface)">Blocco auto</span>
+          <span style="font-size:12px;color:var(--on-surface-variant)">5 min</span>
+        </div>
+      </div>
+
+      <div class="card" style="cursor:default">
+        <div class="section-header" style="margin-top:0"><h3>Info</h3></div>
+        <div class="flex justify-between" style="padding:6px 0;font-size:13px"><span style="color:var(--on-surface-variant)">Versione app</span><span style="color:var(--on-surface)">1.0.0</span></div>
+        <div class="flex justify-between" style="padding:6px 0;font-size:13px"><span style="color:var(--on-surface-variant)">Versione OpenCode</span><span style="color:var(--on-surface)">v${serverInfo.version}</span></div>
+        <div class="modal-item" style="padding:6px 0" onclick="showToast('Apertura documentazione API...')">
+          <span style="font-size:13px;color:var(--on-surface)">📖 API Documentation</span>
+        </div>
+        <div class="modal-item" style="padding:6px 0" onclick="showToast('OpenCode Remote iOS v1.0 · Build 1 · iOS 17+ · Obsidian Flux')">
+          <span style="font-size:13px;color:var(--on-surface)">ℹ Informazioni</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── PERMISSIONS ──
+  function renderPermissions(el) {
+    el.innerHTML = `
+      <div class="perm-card">
+        <div class="perm-header">
+          <div class="perm-icon">⌨</div>
+          <div>
+            <div style="font-size:15px;font-weight:500;color:var(--on-surface)">Execute Command</div>
+            <div style="font-size:11px;color:var(--on-surface-variant)">bash</div>
+          </div>
+          <div class="flex-1"></div>
+          <span class="chip chip-blue">BASH</span>
+        </div>
+        <div class="perm-command">rm -rf /tmp/test_cache && mkdir -p /tmp/test_cache</div>
+        <button class="btn-allow" onclick="allowCommand()">Allow Once</button>
+        <div class="btn-row">
+          <button class="btn-outline" onclick="showToast('Regola permanente creata')">Always Allow</button>
+          <button class="btn-outline deny" onclick="denyCommand()">Deny</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── INIT ──
+  navigate('dashboard', null, 'Dashboard');
+</script>
+</body>
+</html>

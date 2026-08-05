@@ -1,0 +1,52 @@
+# Xcode
+*.xcworkspace
+xcuserdata/
+DerivedData/
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.xcodeproj
+!*.xcodeproj/project.pbxproj
+*.xcuserstate
+
+# XcodeGen / project generation
+project.yml
+
+# Swift Package Manager
+.build/
+Package.resolved
+/.build
+*.swp
+
+# macOS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# iOS
+*.ipa
+*.dylib
+
+# IDE
+.vscode/
+.idea/
+*.xcworkspace
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+tmp/
+temp/
+*.log
+
+# App-specific
+Sources/OpenCodeRemoteApp/Resources/Assets.xcassets/AppIcon.appiconset/*.png
+!Sources/OpenCodeRemoteApp/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json
+
+# Playgrounds
+*.playground/

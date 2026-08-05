@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Session Timeline - OpenCode Remote</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "surface-dim": "#131314",
+                        "on-surface-variant": "#c1c6d7",
+                        "surface-container-low": "#1c1b1c",
+                        "on-tertiary": "#490080",
+                        "on-tertiary-fixed": "#2c0051",
+                        "secondary-fixed": "#e1e0ff",
+                        "primary-fixed": "#d8e2ff",
+                        "inverse-primary": "#005bc1",
+                        "on-secondary-fixed-variant": "#2f2ebe",
+                        "on-tertiary-container": "#400071",
+                        "on-secondary-fixed": "#07006c",
+                        "secondary-container": "#3131c0",
+                        "on-error": "#690005",
+                        "surface-variant": "#353436",
+                        "error": "#ffb4ab",
+                        "tertiary": "#ddb7ff",
+                        "outline": "#8b90a0",
+                        "on-tertiary-fixed-variant": "#6900b3",
+                        "surface-container": "#201f20",
+                        "primary-container": "#4b8eff",
+                        "tertiary-fixed-dim": "#ddb7ff",
+                        "on-background": "#e5e2e3",
+                        "on-surface": "#e5e2e3",
+                        "surface-bright": "#39393a",
+                        "tertiary-fixed": "#f0dbff",
+                        "inverse-on-surface": "#313031",
+                        "on-primary-container": "#00285c",
+                        "surface-container-high": "#2a2a2b",
+                        "outline-variant": "#414755",
+                        "inverse-surface": "#e5e2e3",
+                        "on-error-container": "#ffdad6",
+                        "on-primary-fixed": "#001a41",
+                        "on-primary": "#002e69",
+                        "primary-fixed-dim": "#adc6ff",
+                        "surface-container-highest": "#353436",
+                        "surface-tint": "#adc6ff",
+                        "on-secondary": "#1000a9",
+                        "tertiary-container": "#b76dff",
+                        "on-primary-fixed-variant": "#004493",
+                        "surface": "#131314",
+                        "on-secondary-container": "#b0b2ff",
+                        "secondary": "#c0c1ff",
+                        "surface-container-lowest": "#0e0e0f",
+                        "secondary-fixed-dim": "#c0c1ff",
+                        "primary": "#adc6ff",
+                        "background": "#131314",
+                        "error-container": "#93000a"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem",
+                        "xl": "1.5rem",
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "section-gap": "64px",
+                        "container-padding": "24px",
+                        "base": "8px",
+                        "gutter": "24px",
+                        "safe": "env(safe-area-inset-bottom)"
+                    },
+                    fontFamily: {
+                        "body-md": ["Geist"],
+                        "headline-lg": ["Geist"],
+                        "label-sm": ["JetBrains Mono"],
+                        "code-md": ["JetBrains Mono"]
+                    },
+                    fontSize: {
+                        "body-md": ["16px", { "lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "400" }],
+                        "label-sm": ["12px", { "lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "500" }],
+                        "headline-lg": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        .material-symbols-outlined.fill {
+            font-variation-settings: 'FILL' 1, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        
+        .thinking-glow {
+            box-shadow: 0 8px 32px 0 rgba(173, 198, 255, 0.1);
+            background: linear-gradient(135deg, rgba(32, 31, 32, 0.95), rgba(28, 27, 28, 0.95));
+        }
+        
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        .cursor-blink {
+            animation: blink 1s step-end infinite;
+        }
+
+        body {
+            min-height: 100dvh;
+        }
+
+        .glass-header {
+            background: rgba(19, 19, 20, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        .soft-gradient-bg {
+            background: radial-gradient(circle at top right, rgba(173, 198, 255, 0.05), transparent 40%),
+                        radial-gradient(circle at bottom left, rgba(192, 193, 255, 0.05), transparent 40%);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md h-screen flex flex-col overflow-hidden soft-gradient-bg">
+<!-- TopAppBar -->
+<header class="glass-header text-on-surface font-headline-lg sticky top-0 border-b border-white/5 flex items-center justify-between px-6 h-16 w-full z-50">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary" data-icon="terminal">terminal</span>
+<span class="font-label-sm text-sm font-bold tracking-tighter uppercase text-primary/80">OpenCode Remote</span>
+</div>
+<div class="flex items-center">
+<span class="material-symbols-outlined fill text-on-surface-variant hover:text-primary transition-colors cursor-pointer" data-icon="account_circle">account_circle</span>
+</div>
+</header>
+<!-- Sub Header: Session Info (Centered) -->
+<div class="glass-header border-b border-white/5 px-6 py-4 flex flex-col items-center gap-2 shrink-0">
+<div class="flex items-center justify-center w-full relative">
+<span class="material-symbols-outlined text-on-surface-variant absolute left-0 cursor-pointer" data-icon="arrow_back">arrow_back</span>
+<h1 class="font-headline-lg text-lg text-primary text-center">Refactor Auth Service</h1>
+</div>
+<div class="flex items-center gap-2 px-3 py-1 bg-primary/10 border border-primary/20 rounded-full">
+<span class="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+<span class="font-label-sm text-[10px] uppercase text-primary">Thinking...</span>
+</div>
+</div>
+<!-- Main Scrollable Timeline -->
+<main class="flex-1 overflow-y-auto p-container-padding flex flex-col gap-6 pb-32">
+<!-- Timeline Item 1: User Message (Centered refined) -->
+<div class="flex flex-col items-end w-full">
+<div class="bg-surface-container-high border border-white/5 rounded-xl rounded-tr-none p-4 max-w-[85%] shadow-lg">
+<p class="text-on-surface leading-relaxed">Can you optimize the JWT validation in auth.py?</p>
+</div>
+<span class="font-label-sm text-[10px] text-on-surface-variant mt-2 mr-1 opacity-60 uppercase tracking-widest">User • 10:42 AM</span>
+</div>
+<!-- Timeline Item 2: Thinking Bubble (Integrated Rounded) -->
+<div class="flex flex-col items-start w-full">
+<div class="thinking-glow border border-primary/10 rounded-xl rounded-tl-none p-5 max-w-[90%] w-full">
+<div class="flex items-center gap-2 mb-3 opacity-80">
+<span class="material-symbols-outlined text-primary text-[20px] animate-pulse" data-icon="psychology">psychology</span>
+<span class="font-label-sm text-xs text-primary uppercase tracking-wider">Internal Reasoning</span>
+</div>
+<div class="font-code-md text-sm text-on-surface-variant/90 leading-relaxed italic">
+                Analyzing current validation logic... identifying bottleneck in RSA verification...<span class="inline-block w-1.5 h-4 bg-primary/50 ml-1 align-middle cursor-blink"></span>
+</div>
+</div>
+</div>
+<!-- Timeline Item 3: Tool Call Card (Softened) -->
+<div class="flex flex-col items-start w-full">
+<div class="bg-surface-container-lowest/50 border border-white/5 rounded-xl overflow-hidden max-w-[90%] w-full shadow-md">
+<!-- Tool Header -->
+<div class="bg-surface-container/60 px-4 py-3 border-b border-white/5 flex items-center gap-3">
+<span class="material-symbols-outlined text-primary text-[18px]" data-icon="terminal">terminal</span>
+<span class="font-label-sm text-xs text-on-surface-variant flex-1 truncate">grep -r "JWT" ./app/auth</span>
+<span class="font-label-sm text-[9px] text-primary bg-primary/10 px-2 py-0.5 rounded-full uppercase tracking-tighter">Success</span>
+</div>
+<!-- Tool Output -->
+<div class="p-4 bg-black/20 backdrop-blur-sm overflow-x-auto">
+<pre class="font-label-sm text-xs text-on-surface-variant/80 m-0 leading-relaxed">Found 12 occurrences...
+./app/auth/tokens.py:42: def validate_JWT(token: str):
+./app/auth/middleware.py:15: jwt_payload = decode(token)
+...</pre>
+</div>
+</div>
+</div>
+<div class="h-8"></div>
+</main>
+<!-- Fixed Bottom Bar -->
+<div class="fixed bottom-0 left-0 w-full glass-header border-t border-white/5 px-6 py-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] flex justify-between items-center z-50">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 rounded-lg bg-surface-container flex items-center justify-center border border-white/5">
+<span class="material-symbols-outlined text-primary text-[18px]" data-icon="memory">memory</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-sm text-[10px] text-on-surface-variant/60 uppercase tracking-widest">Active Engine</span>
+<span class="font-label-sm text-xs text-on-surface">OpenCode-Pro-v4</span>
+</div>
+</div>
+<button class="bg-error-container/80 hover:bg-error transition-all duration-300 text-on-error-container hover:text-on-error px-6 py-2.5 rounded-full flex items-center gap-2 group shadow-xl hover:shadow-error/20">
+<span class="material-symbols-outlined text-[20px] group-hover:rotate-90 transition-transform" data-icon="stop_circle">stop_circle</span>
+<span class="font-label-sm text-xs uppercase tracking-widest font-bold">Stop Process</span>
+</button>
+</div>
+</body></html>

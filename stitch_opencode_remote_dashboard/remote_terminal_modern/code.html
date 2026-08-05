@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, viewport-fit=cover" name="viewport"/>
+<title>OpenCode Remote Terminal</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;600&amp;family=JetBrains+Mono:wght@400;500;700&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Config -->
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "on-primary": "#002e69",
+                "on-primary-container": "#00285c",
+                "tertiary-fixed-dim": "#ddb7ff",
+                "on-secondary-container": "#b0b2ff",
+                "outline": "#8b90a0",
+                "on-surface-variant": "#c1c6d7",
+                "on-primary-fixed": "#001a41",
+                "secondary-fixed-dim": "#c0c1ff",
+                "surface-container-lowest": "#0e0e0f",
+                "primary-fixed-dim": "#adc6ff",
+                "inverse-on-surface": "#313031",
+                "surface-container-highest": "#353436",
+                "surface-dim": "#131314",
+                "secondary-fixed": "#e1e0ff",
+                "error-container": "#93000a",
+                "on-tertiary": "#490080",
+                "on-error": "#690005",
+                "surface-bright": "#39393a",
+                "primary": "#adc6ff",
+                "background": "#131314",
+                "on-secondary-fixed-variant": "#2f2ebe",
+                "surface-tint": "#adc6ff",
+                "error": "#ffb4ab",
+                "on-surface": "#e5e2e3",
+                "on-secondary-fixed": "#07006c",
+                "on-primary-fixed-variant": "#004493",
+                "surface-container": "#201f20",
+                "secondary-container": "#3131c0",
+                "surface-variant": "#353436",
+                "on-error-container": "#ffdad6",
+                "tertiary": "#ddb7ff",
+                "surface": "#131314",
+                "primary-container": "#4b8eff",
+                "on-tertiary-fixed-variant": "#6900b3",
+                "on-secondary": "#1000a9",
+                "on-background": "#e5e2e3",
+                "tertiary-container": "#b76dff",
+                "surface-container-low": "#1c1b1c",
+                "outline-variant": "#414755",
+                "on-tertiary-container": "#400071",
+                "inverse-primary": "#005bc1",
+                "primary-fixed": "#d8e2ff",
+                "secondary": "#c0c1ff",
+                "tertiary-fixed": "#f0dbff",
+                "surface-container-high": "#2a2a2b",
+                "on-tertiary-fixed": "#2c0051",
+                "inverse-surface": "#e5e2e3"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "2xl": "1.5rem",
+                "3xl": "2rem",
+                "full": "9999px"
+        },
+        "spacing": {
+                "gutter": "24px",
+                "container-padding": "32px",
+                "section-gap": "64px",
+                "base": "8px"
+        },
+        "fontFamily": {
+                "label-sm": [
+                        "JetBrains Mono"
+                ],
+                "headline-lg": [
+                        "Geist"
+                ],
+                "display-lg": [
+                        "Geist"
+                ],
+                "body-md": [
+                        "Geist"
+                ],
+                "headline-lg-mobile": [
+                        "Geist"
+                ],
+                "mono": ["JetBrains Mono", "SF Mono", "ui-monospace", "monospace"]
+        },
+        "fontSize": {
+                "label-sm": [
+                        "12px",
+                        {
+                                "lineHeight": "16px",
+                                "letterSpacing": "0.02em",
+                                "fontWeight": "500"
+                        }
+                ],
+                "headline-lg": [
+                        "32px",
+                        {
+                                "lineHeight": "40px",
+                                "letterSpacing": "-0.02em",
+                                "fontWeight": "600"
+                        }
+                ],
+                "display-lg": [
+                        "48px",
+                        {
+                                "lineHeight": "56px",
+                                "letterSpacing": "-0.04em",
+                                "fontWeight": "600"
+                        }
+                ],
+                "body-md": [
+                        "16px",
+                        {
+                                "lineHeight": "24px",
+                                "letterSpacing": "-0.01em",
+                                "fontWeight": "400"
+                        }
+                ],
+                "headline-lg-mobile": [
+                        "24px",
+                        {
+                                "lineHeight": "32px",
+                                "letterSpacing": "-0.02em",
+                                "fontWeight": "600"
+                        }
+                ]
+        }
+},
+    },
+  }
+</script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .filled-icon {
+            font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        
+        /* Terminal specific styles */
+        .cursor-blink {
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        
+        /* Hide scrollbar for clean terminal look but keep functionality */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        
+        .obsidian-glass {
+            background: rgba(28, 27, 28, 0.6);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-[#131314] text-[#ECEAE4] h-screen flex flex-col overflow-hidden font-mono text-[14px] leading-relaxed selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 px-4 pt-4">
+<div class="max-w-5xl mx-auto h-14 obsidian-glass rounded-2xl px-6 flex justify-between items-center">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary text-[20px]">folder_open</span>
+<h1 class="font-mono text-sm tracking-tight text-[#ECEAE4]">~/workspace/core</h1>
+</div>
+<button class="text-error font-mono text-sm px-3 py-1.5 rounded-xl border border-error/20 bg-error/10 hover:bg-error/20 transition-colors">
+                Disconnect
+            </button>
+</div>
+</header>
+<!-- Main Terminal Viewport -->
+<main class="flex-1 mt-24 mb-32 md:mb-0 px-6 py-4 overflow-y-auto no-scrollbar w-full max-w-5xl mx-auto relative group">
+<!-- Terminal Output -->
+<div class="flex flex-col gap-2 pb-8 w-full">
+<div class="flex flex-col gap-1 opacity-90">
+<div class="flex items-start flex-wrap">
+<span class="text-[#39D2C0] font-medium shrink-0">sysadmin@opencode</span>
+<span class="text-outline mx-1">:</span>
+<span class="text-primary shrink-0">~/workspace/core</span>
+<span class="text-outline mx-1">$</span>
+<span class="text-[#ECEAE4] ml-1 break-all">systemctl status opencode-daemon</span>
+</div>
+<div class="text-[#ECEAE4] pl-2 mt-1">
+<span class="text-[#39D2C0]">●</span> opencode-daemon.service - OpenCode Edge Routing Daemon<br/>
+                       Loaded: loaded (/etc/systemd/system/opencode-daemon.service; enabled; vendor preset: enabled)<br/>
+                       Active: <span class="text-[#39D2C0]">active (running)</span> since Wed 2023-10-25 08:12:44 UTC; 4 days ago<br/>
+                     Main PID: 18492 (opencode-node)<br/>
+                        Tasks: 42 (limit: 4915)<br/>
+                       Memory: 214.3M<br/>
+                       CGroup: /system.slice/opencode-daemon.service<br/>
+                               └─18492 /usr/bin/node /opt/opencode/daemon.js
+                </div>
+</div>
+<div class="flex items-start flex-wrap mt-4">
+<span class="text-[#39D2C0] font-medium shrink-0">sysadmin@opencode</span>
+<span class="text-outline mx-1">:</span>
+<span class="text-primary shrink-0">~/workspace/core</span>
+<span class="text-outline mx-1">$</span>
+<span class="text-[#ECEAE4] ml-1 break-all">git pull origin main</span>
+</div>
+<div class="text-[#ECEAE4] pl-2 mt-1 opacity-80">
+                From github.com:opencode/core<br/>
+                 * branch            main       -&gt; FETCH_HEAD<br/>
+                Already up to date.
+            </div>
+<div class="flex items-start flex-wrap mt-4">
+<span class="text-[#39D2C0] font-medium shrink-0">sysadmin@opencode</span>
+<span class="text-outline mx-1">:</span>
+<span class="text-primary shrink-0">~/workspace/core</span>
+<span class="text-outline mx-1">$</span>
+<span class="text-[#ECEAE4] ml-1 break-all">npm run build</span>
+</div>
+<div class="text-[#ECEAE4] pl-2 mt-1">
+                &gt; core-engine@2.4.1 build<br/>
+                &gt; tsc &amp;&amp; vite build<br/><br/>
+<span class="text-[#39D2C0]">vite v4.4.9 building for production...</span><br/>
+                ✓ 142 modules transformed.<br/>
+                dist/assets/index-38d2c0.js   124.50 kB │ gzip: 42.12 kB<br/>
+                dist/assets/vendor-859490.js  842.10 kB │ gzip: 245.80 kB<br/>
+<span class="text-[#39D2C0]">✓ built in 4.23s</span>
+</div>
+<!-- Active Input Line -->
+<div class="flex items-start flex-wrap mt-6 relative w-full">
+<span class="text-[#39D2C0] font-medium shrink-0">sysadmin@opencode</span>
+<span class="text-outline mx-1">:</span>
+<span class="text-primary shrink-0">~/workspace/core</span>
+<span class="text-outline mx-1">$</span>
+<div class="flex items-center ml-1 flex-1 relative">
+<span class="text-[#ECEAE4]">tail -f /var/log/sys</span>
+<!-- Blinking Cursor -->
+<span class="inline-block w-[8px] h-[16px] bg-[#39D2C0] cursor-blink ml-[1px] shadow-[0_0_8px_rgba(57,210,192,0.6)]"></span>
+</div>
+</div>
+</div>
+</main>
+<!-- Mobile Keyboard Action Bar (Floating above bottom nav) -->
+<div class="md:hidden fixed bottom-24 left-4 right-4 z-40 p-2 flex gap-2 overflow-x-auto no-scrollbar obsidian-glass rounded-2xl">
+<button class="shrink-0 px-4 py-2 rounded-xl bg-surface-container-low border border-white/5 text-on-surface hover:bg-surface-container-high transition-colors text-xs font-mono font-medium active:bg-primary/20">ESC</button>
+<button class="shrink-0 px-4 py-2 rounded-xl bg-surface-container-low border border-white/5 text-on-surface hover:bg-surface-container-high transition-colors text-xs font-mono font-medium active:bg-primary/20">TAB</button>
+<button class="shrink-0 px-4 py-2 rounded-xl bg-surface-container-low border border-white/5 text-on-surface hover:bg-surface-container-high transition-colors text-xs font-mono font-medium active:bg-primary/20">CTRL</button>
+<button class="shrink-0 px-4 py-2 rounded-xl bg-surface-container-low border border-white/5 text-on-surface hover:bg-surface-container-high transition-colors text-xs font-mono font-medium active:bg-primary/20">ALT</button>
+<div class="w-px h-6 bg-white/10 mx-1 self-center shrink-0"></div>
+<button class="shrink-0 px-3 py-2 rounded-xl bg-surface-container-low border border-white/5 text-on-surface hover:bg-surface-container-high transition-colors flex items-center justify-center active:bg-primary/20">
+<span class="material-symbols-outlined text-[18px]">arrow_upward</span>
+</button>
+<button class="shrink-0 px-3 py-2 rounded-xl bg-surface-container-low border border-white/5 text-on-surface hover:bg-surface-container-high transition-colors flex items-center justify-center active:bg-primary/20">
+<span class="material-symbols-outlined text-[18px]">arrow_downward</span>
+</button>
+<button class="shrink-0 px-3 py-2 rounded-xl bg-surface-container-low border border-white/5 text-on-surface hover:bg-surface-container-high transition-colors flex items-center justify-center active:bg-primary/20">
+<span class="material-symbols-outlined text-[18px]">arrow_left</span>
+</button>
+<button class="shrink-0 px-3 py-2 rounded-xl bg-surface-container-low border border-white/5 text-on-surface hover:bg-surface-container-high transition-colors flex items-center justify-center active:bg-primary/20">
+<span class="material-symbols-outlined text-[18px]">arrow_right</span>
+</button>
+</div>
+<!-- BottomNavBar (iOS-style Centered Icons) -->
+<nav class="md:hidden fixed bottom-6 left-6 right-6 z-50 obsidian-glass rounded-3xl h-20 flex justify-around items-center px-6">
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 transition-all" href="#">
+<div class="w-12 h-8 flex items-center justify-center rounded-2xl mb-1">
+<span class="material-symbols-outlined text-[24px]">grid_view</span>
+</div>
+<span class="font-label-sm text-[10px] uppercase tracking-tighter">Dash</span>
+</a>
+<a class="flex flex-col items-center justify-center text-primary transition-all" href="#">
+<div class="w-12 h-8 flex items-center justify-center rounded-2xl bg-primary/10 mb-1">
+<span class="material-symbols-outlined text-[24px]" style="font-variation-settings: 'FILL' 1;">terminal</span>
+</div>
+<span class="font-label-sm text-[10px] uppercase tracking-tighter font-bold">Terminal</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 transition-all relative" href="#">
+<div class="w-12 h-8 flex items-center justify-center rounded-2xl mb-1">
+<span class="material-symbols-outlined text-[24px]">verified_user</span>
+<span class="absolute top-0 right-2 w-2 h-2 rounded-full bg-error border-2 border-surface"></span>
+</div>
+<span class="font-label-sm text-[10px] uppercase tracking-tighter">Perms</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant/60 transition-all" href="#">
+<div class="w-12 h-8 flex items-center justify-center rounded-2xl mb-1">
+<span class="material-symbols-outlined text-[24px]">settings</span>
+</div>
+<span class="font-label-sm text-[10px] uppercase tracking-tighter">Config</span>
+</a>
+</nav>
+</body></html>
