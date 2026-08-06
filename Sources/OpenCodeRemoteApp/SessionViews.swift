@@ -262,6 +262,16 @@ struct SessionsListView: View {
                         action: createNewSession,
                         actionTitle: "Nuova sessione"
                     )
+                } else if filteredSessions.isEmpty {
+                    // Ricerca attiva senza risultati: le sessioni esistono,
+                    // è il filtro a non trovare nulla.
+                    EmptyStateView(
+                        icon: "search",
+                        title: "Nessun risultato",
+                        description: "Nessuna sessione corrisponde a \"\(searchText)\"",
+                        action: { searchText = "" },
+                        actionTitle: "Azzera ricerca"
+                    )
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 12) {
@@ -272,6 +282,13 @@ struct SessionsListView: View {
                                     }
                                 }
                                 .buttonStyle(.plain)
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) {
+                                        deleteSession(session)
+                                    } label: {
+                                        Label("Elimina", systemImage: "trash")
+                                    }
+                                }
                             }
                         }
                         .padding(.horizontal, 16)
@@ -316,6 +333,19 @@ struct SessionsListView: View {
             } catch {
                 // Silenzioso: non impostare connectionError per non
                 // reindirizzare l'utente alla ConnectingView.
+            }
+        }
+    }
+
+    private func deleteSession(_ session: Session) {
+        Task {
+            do {
+                try await appState.apiClient.deleteSession(session.id)
+                await MainActor.run {
+                    appState.activeSessions.removeAll { $0.id == session.id }
+                }
+            } catch {
+                // Best-effort: se la rimozione fallisce la riga resta in lista.
             }
         }
     }

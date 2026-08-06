@@ -339,6 +339,25 @@ public actor ServerSessionStore {
         touch()
     }
 
+    /// Rimappa un messaggio ottimistico dal suo id locale al `serverMessageID`
+    /// restituito dal server alla risposta del prompt. Così il placeholder
+    /// resta visibile e viene sostituito dal messaggio reale quando arriva via
+    /// SSE con l'id del server (invece di sparire prematuramente quando il
+    /// server assegna un id diverso da quello locale).
+    public func remapOptimistic(from localID: String, to serverID: String) {
+        guard !serverID.isEmpty, serverID != localID else {
+            confirmOptimistic(messageID: localID)
+            return
+        }
+        guard optimisticIDs.remove(localID) != nil,
+              let idx = messages.firstIndex(where: { $0.id == localID }) else { return }
+        var message = messages[idx]
+        message.id = serverID
+        messages[idx] = message
+        optimisticIDs.insert(serverID)
+        touch()
+    }
+
     // MARK: - Ciclo di vita / protezione
 
     /// Aggiorna il timestamp dell'ultimo accesso (LRU del pool).
@@ -400,6 +419,14 @@ public actor ServerSessionStore {
         let incomingIDs = Set(incoming.map(\.id))
         messages.removeAll { !incomingIDs.contains($0.id) && !optimisticIDs.contains($0.id) }
         upsertMessages(incoming)
+        // Stato di streaming orfano: i delta di un turno precedente mai
+        // conclusi (part mai arrivata nel messaggio) non vanno ri-mostrati
+        // come streaming in sessioni successive della stessa sessione.
+        let activePartIDs = Set(messages.flatMap(Self.partIDs(of:)))
+        partTexts = partTexts.filter { activePartIDs.contains($0.key) }
+        partStates = partStates.filter { activePartIDs.contains($0.key) }
+        partTextOrder = partTextOrder.filter { activePartIDs.contains($0) }
+        toolOutputs = toolOutputs.filter { activePartIDs.contains($0.key) }
     }
 
     private func upsertMessages(_ incoming: [MessageV2]) {

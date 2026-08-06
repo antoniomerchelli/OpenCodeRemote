@@ -133,35 +133,37 @@ public struct ChangeModelIntent: AppIntent {
 
 public struct OpenCodeShortcuts: AppShortcutsProvider {
     public static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: AskOpenCodeIntent(),
-            phrases: [
-                "Chiedi qualcosa a ${applicationName}",
-                "Fai una domanda a ${applicationName}",
-                "Usa ${applicationName} per un prompt",
-            ],
-            shortTitle: "Chiedi a OpenCode",
-            systemImageName: "brain"
-        )
-        AppShortcut(
-            intent: CheckPermissionsIntent(),
-            phrases: [
-                "Controlla i permessi di ${applicationName}",
-                "Permessi in sospeso di ${applicationName}",
-                "Ci sono permessi da approvare in ${applicationName}",
-            ],
-            shortTitle: "Permessi in sospeso",
-            systemImageName: "shield"
-        )
-        AppShortcut(
-            intent: ChangeModelIntent(),
-            phrases: [
-                "Cambia il modello di ${applicationName}",
-                "Cambia modello in ${applicationName}",
-            ],
-            shortTitle: "Cambia modello",
-            systemImageName: "cpu"
-        )
+        return [
+            AppShortcut(
+                intent: AskOpenCodeIntent(),
+                phrases: [
+                    "Chiedi qualcosa a ${applicationName}",
+                    "Fai una domanda a ${applicationName}",
+                    "Usa ${applicationName} per un prompt",
+                ],
+                shortTitle: "Chiedi a OpenCode",
+                systemImageName: "brain"
+            ),
+            AppShortcut(
+                intent: CheckPermissionsIntent(),
+                phrases: [
+                    "Controlla i permessi di ${applicationName}",
+                    "Permessi in sospeso di ${applicationName}",
+                    "Ci sono permessi da approvare in ${applicationName}",
+                ],
+                shortTitle: "Permessi in sospeso",
+                systemImageName: "shield"
+            ),
+            AppShortcut(
+                intent: ChangeModelIntent(),
+                phrases: [
+                    "Cambia il modello di ${applicationName}",
+                    "Cambia modello in ${applicationName}",
+                ],
+                shortTitle: "Cambia modello",
+                systemImageName: "cpu"
+            ),
+        ]
     }
 }
 #endif

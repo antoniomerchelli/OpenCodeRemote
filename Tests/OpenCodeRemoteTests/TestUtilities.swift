@@ -28,6 +28,10 @@ final class TestClock: @unchecked Sendable {
 /// URLProtocol base per mockare richieste HTTP senza rete reale.
 class MockURLProtocol: URLProtocol, @unchecked Sendable {
     static var responseHandler: ((URLRequest) -> (Data?, URLResponse?, Error?))?
+    /// Se true, la risposta viene consegnata ma la connessione NON viene mai
+    /// chiusa (`urlProtocolDidFinishLoading` non chiamato): simula una
+    /// connessione half-open / TCP zombie per testare il watchdog idle.
+    static var neverFinish = false
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -41,7 +45,9 @@ class MockURLProtocol: URLProtocol, @unchecked Sendable {
         if let response { client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed) }
         if let data { client?.urlProtocol(self, didLoad: data) }
         if let error { client?.urlProtocol(self, didFailWithError: error) }
-        client?.urlProtocolDidFinishLoading(self)
+        if !Self.neverFinish {
+            client?.urlProtocolDidFinishLoading(self)
+        }
     }
 
     override func stopLoading() {}

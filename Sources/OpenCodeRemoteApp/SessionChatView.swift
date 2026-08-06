@@ -36,14 +36,29 @@ final class SessionChatViewModel {
     private(set) var permissions: [PermissionRequestV2] = []
     private(set) var questions: [QuestionV2] = []
     private(set) var isFetchingOlder = false
+    /// True durante il prepend di "Carica messaggi precedenti": l'auto-scroll
+    /// in fondo è sospeso per non far perdere la posizione di lettura.
+    private(set) var suppressAutoScroll = false
     /// Id (requestID) dei permessi/domande a cui l'utente ha già risposto:
     /// i bottoni del dock restano disabilitati finché il server conferma.
     private(set) var pendingReplies: Set<String> = []
 
     // MARK: Privati
     private var subscriptionTask: Task<Void, Never>?
+    /// Generazione della subscription corrente: incrementata a ogni `start()`.
+    /// Il cleanup del task vecchio azzera `subscriptionTask` solo se la
+    /// generazione è ancora la sua (evita di perdere il riferimento al task
+    /// nuovo dopo un tab-switch rapido).
+    private var subscriptionGeneration = 0
     private var permissionTask: Task<Void, Never>?
     private var questionTask: Task<Void, Never>?
+    /// Le card permessi/domande mostrate sono fallback minimi (fetch dettagli
+    /// vuoto): si rifà il fetch a ogni snapshot entro un budget di tentativi
+    /// finché il server non espone i dettagli veri.
+    private var permissionsAreFallback = false
+    private var questionsAreFallback = false
+    private var permissionFallbackAttempts = 0
+    private var questionFallbackAttempts = 0
 
     init(sessionID: String, appState: AppState) {
         self.sessionID = sessionID
@@ -56,6 +71,8 @@ final class SessionChatViewModel {
     /// snapshot a ogni evento SSE applicato.
     func start() {
         guard subscriptionTask == nil else { return }
+        subscriptionGeneration += 1
+        let generation = subscriptionGeneration
         subscriptionTask = Task { [weak self] in
             guard let self else { return }
             self.error = nil
@@ -72,9 +89,14 @@ final class SessionChatViewModel {
             if self.snapshot == nil {
                 self.isV2Unavailable = true
             }
-            // Il task è terminato: ripristina il nil così "Riprova" (start)
-            // può ripartire davvero.
-            self.subscriptionTask = nil
+            // Il task è terminato: ripristina il nil SOLO se è ancora quello
+            // corrente. Senza il guard, un task vecchio (cancellato da stop()
+            // ma non ancora terminato) azzererebbe il riferimento al task
+            // nuovo → la subscription nuova non verrebbe mai più cancellata
+            // e a ogni tab-switch si aprirebbe un secondo stream SSE.
+            if self.subscriptionGeneration == generation {
+                self.subscriptionTask = nil
+            }
         }
     }
 
@@ -123,12 +145,17 @@ final class SessionChatViewModel {
     func loadOlder() {
         guard !isFetchingOlder, snapshot?.meta.complete != true else { return }
         isFetchingOlder = true
+        suppressAutoScroll = true
         Task {
             await appState.loadOlderMessages(sessionID: sessionID)
             if let updated = await appState.sessionSnapshot(sessionID: sessionID) {
                 self.snapshot = updated
             }
             isFetchingOlder = false
+            // Piccola pausa: la view si è già ri-layoutata col prepend, ora si
+            // può riattivare l'auto-scroll senza saltare in fondo.
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            suppressAutoScroll = false
         }
     }
 
@@ -256,38 +283,80 @@ final class SessionChatViewModel {
 
     private func syncPermissionsAndQuestions(_ snap: SessionStoreSnapshot) {
         let localPermIDs = Set(permissions.compactMap { $0.requestID ?? $0.id })
-        if snap.pendingPermissionIDs != localPermIDs {
+        if snap.pendingPermissionIDs != localPermIDs || permissionsAreFallback {
             if snap.pendingPermissionIDs.isEmpty {
                 permissions = []
+                permissionsAreFallback = false
+                permissionFallbackAttempts = 0
             } else {
                 permissionTask?.cancel()
                 permissionTask = Task { [weak self] in
                     guard let self else { return }
                     let fetched = await self.appState.pendingPermissionRequests(sessionID: self.sessionID)
-                    // Anti micro-loop: se il fetch ritorna vuoto mentre il server
-                    // dice che ci sono permessi pendenti, il server è in ritardo:
-                    // si mantiene la lista corrente senza ri-fetchare a ogni snapshot.
+                    // Il task può essere stato cancellato mentre il fetch era in
+                    // volo (es. la snapshot ha già rimosso i pending): non
+                    // ripopolare le card con dati ormai stantii.
+                    guard !Task.isCancelled else { return }
                     if fetched.isEmpty {
-                        if self.permissions.isEmpty, self.snapshot?.pendingPermissionIDs.isEmpty == false {
-                            // nessun dato: il dock resta vuoto ma niente loop
+                        // Fallback: il fetch dettagli è vuoto (server v1 o lista
+                        // non ancora propagata), ma lo snapshot ha richieste
+                        // pendenti. Mostra card minime costruite dai requestID.
+                        // Anti micro-loop e anti-degradazione:
+                        //  - se ci sono già card REALI, non sovrascriverle;
+                        //  - se le card sono già minime, rifai il fetch solo per
+                        //    un budget limitato di tentativi, così quando il
+                        //    server popola i dettagli la card viene aggiornata
+                        //    senza churn infinito.
+                        if !self.permissions.isEmpty, !self.permissionsAreFallback {
+                            return
                         }
+                        if self.permissionsAreFallback, self.permissionFallbackAttempts >= 3 {
+                            return
+                        }
+                        let fallback = snap.pendingPermissionIDs.map {
+                            PermissionRequestV2(id: $0, requestID: $0, sessionID: self.sessionID, responded: false)
+                        }
+                        self.permissions = fallback
+                        self.permissionsAreFallback = true
+                        self.permissionFallbackAttempts += 1
                         return
                     }
                     self.permissions = fetched
+                    self.permissionsAreFallback = false
+                    self.permissionFallbackAttempts = 0
                 }
             }
         }
         let localQIDs = Set(questions.compactMap { $0.requestID ?? $0.id })
-        if snap.pendingQuestionIDs != localQIDs {
+        if snap.pendingQuestionIDs != localQIDs || questionsAreFallback {
             if snap.pendingQuestionIDs.isEmpty {
                 questions = []
+                questionsAreFallback = false
+                questionFallbackAttempts = 0
             } else {
                 questionTask?.cancel()
                 questionTask = Task { [weak self] in
                     guard let self else { return }
                     let fetched = await self.appState.pendingQuestions(sessionID: self.sessionID)
-                    if fetched.isEmpty { return }
+                    guard !Task.isCancelled else { return }
+                    if fetched.isEmpty {
+                        if !self.questions.isEmpty, !self.questionsAreFallback {
+                            return
+                        }
+                        if self.questionsAreFallback, self.questionFallbackAttempts >= 3 {
+                            return
+                        }
+                        let fallback = snap.pendingQuestionIDs.map {
+                            QuestionV2(id: $0, requestID: $0, sessionID: self.sessionID, prompt: "Domanda in attesa", allowFreeText: true)
+                        }
+                        self.questions = fallback
+                        self.questionsAreFallback = true
+                        self.questionFallbackAttempts += 1
+                        return
+                    }
                     self.questions = fetched
+                    self.questionsAreFallback = false
+                    self.questionFallbackAttempts = 0
                 }
             }
         }
@@ -417,6 +486,17 @@ private struct ChatScreen: View {
                     if viewModel.isLoading {
                         LoadingView(message: "Caricamento conversazione...")
                     } else if let snap = viewModel.snapshot {
+                        if snap.messages.isEmpty, !viewModel.isWorking {
+                            // Snapshot arrivato ma conversazione vuota: guida
+                            // all'utente invece di una chat bianca.
+                            EmptyStateView(
+                                icon: "message",
+                                title: "Nessuna conversazione",
+                                description: "Invia il primo messaggio per iniziare a lavorare con l'agente.",
+                                action: nil
+                            )
+                        }
+
                         if viewModel.canLoadOlder {
                             Button(action: { viewModel.loadOlder() }) {
                                 HStack(spacing: SaharaSpacing.xs) {
@@ -489,7 +569,13 @@ private struct ChatScreen: View {
                 .padding(16)
                 .padding(.bottom, 160)
             }
-            .onChange(of: viewModel.messages.count) { _, _ in scrollToBottom(proxy, animated: true) }
+            .onChange(of: viewModel.messages.count) { _, _ in
+                // Durante il prepend di "Carica messaggi precedenti" lo scroll
+                // forzato farebbe perdere la posizione di lettura all'utente.
+                if !viewModel.suppressAutoScroll {
+                    scrollToBottom(proxy, animated: true)
+                }
+            }
             .onChange(of: viewModel.streamingLength) { _, _ in scrollToBottom(proxy, animated: false) }
         }
     }

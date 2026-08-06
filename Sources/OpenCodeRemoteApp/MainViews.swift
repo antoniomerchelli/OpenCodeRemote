@@ -8,6 +8,10 @@ struct LockScreenView: View {
     let onResult: (Bool) -> Void
     @State private var isAuthenticating = false
     @State private var failed = false
+    /// True se la biometria non è disponibile sul dispositivo (es. simulatore):
+    /// in quel caso si offre "Continua senza blocco" come via d'uscita,
+    /// altrimenti l'app sarebbe inutilizzabile (loop "Autenticazione fallita").
+    @State private var biometricsUnavailable = false
 
     var body: some View {
         VStack(spacing: 24) {
@@ -40,11 +44,26 @@ struct LockScreenView: View {
                 .cornerRadius(SaharaRadius.full)
             }
             .disabled(isAuthenticating)
+
+            if biometricsUnavailable {
+                Button(action: { onResult(true) }) {
+                    Text("Continua senza blocco")
+                        .font(SaharaFont.body(14))
+                        .foregroundColor(SaharaColors.secondary)
+                        .padding(.top, 4)
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SaharaColors.background)
         .onAppear {
-            authenticate()
+            Task {
+                if await appState.faceID.isAvailable {
+                    authenticate()
+                } else {
+                    biometricsUnavailable = true
+                }
+            }
         }
     }
 
@@ -55,12 +74,28 @@ struct LockScreenView: View {
         failed = false
 
         Task {
-            let success = (try? await appState.faceID.authenticate(reason: "Sblocca OpenCode Remote")) ?? false
-            await MainActor.run {
-                isAuthenticating = false
-                if success {
-                    onResult(true)
-                } else {
+            do {
+                let success = try await appState.faceID.authenticate(reason: "Sblocca OpenCode Remote")
+                await MainActor.run {
+                    isAuthenticating = false
+                    if success {
+                        onResult(true)
+                    } else {
+                        failed = true
+                    }
+                }
+            } catch let error as FaceIDError {
+                await MainActor.run {
+                    isAuthenticating = false
+                    if case .notAvailable = error {
+                        biometricsUnavailable = true
+                    } else {
+                        failed = true
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isAuthenticating = false
                     failed = true
                 }
             }
@@ -92,6 +127,18 @@ struct ServerSetupView: View {
                     .padding(.horizontal, 32)
 
                 Spacer()
+
+                if let errorMessage = appState.connectionError, !errorMessage.isEmpty {
+                    Text(errorMessage)
+                        .font(SaharaFont.body(13))
+                        .foregroundColor(SaharaColors.error)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(SaharaColors.error.opacity(0.08))
+                        .cornerRadius(SaharaRadius.md)
+                        .padding(.horizontal, 24)
+                }
 
                 if appState.settings.servers.isEmpty {
                     Button(action: { showAddServer = true }) {

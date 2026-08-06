@@ -18,6 +18,11 @@ enum Scenario: String {
     case reconnectTest = "reconnect-test"
     /// Un evento `session.status` con `{"status":"retry"}` poi chiusura.
     case error
+    /// Emette permessi e domande con i nomi EVENTO REALI del server OpenCode
+    /// (`permission.asked`, `question.asked`, ... SENZA prefisso `session.`) e
+    /// payload completi (l'intero oggetto PermissionRequest/Question, non solo
+    /// `{"requestID": ...}`).
+    case permissionQuestion = "permission-question"
 }
 
 // MARK: - Config
@@ -223,12 +228,16 @@ final class MockServer {
 
     func messageUpdatedData(sessionID: String, fragments: [String]) -> String {
         let fullText = fragments.joined()
+        // time in ISO8601 (il decoder client usa .iso8601; i millisecondi
+        // epoch darebbero timestamp 1970) e part con id esplicito (senza id
+        // la part resta orfana in partTexts → streaming duplicato).
+        let iso = ISO8601DateFormatter().string(from: Date())
         let obj: [String: Any] = [
             "id": "msg-2",
             "sessionID": sessionID,
             "role": "assistant",
-            "time": ["created": Int(Date().timeIntervalSince1970 * 1000)],
-            "content": [["type": "text", "text": fullText]],
+            "time": ["created": iso],
+            "content": [["type": "text", "id": "part-1", "text": fullText]],
         ]
         return String(data: jsonData(obj), encoding: .utf8) ?? "{}"
     }
@@ -359,10 +368,13 @@ final class MockServer {
             let id = nextSessionID()
             connection.respondJSON(status: 201, object: v1SessionJSON(id: id, title: "New Session")); return
         case ("GET", ["api", "session"]):
+            // Il client (OpenCodeAPIClientV2.list) decodifica SessionListV2 che
+            // accetta array nudo O `{"sessions":[...]}`/`{"items":[...]}` ma NON
+            // `{"data":[...]}`: rispondere con array nudo.
             let sessions = registeredSessions.isEmpty
                 ? [sessionV2JSON(id: "sess-1")]
                 : registeredSessions.map { sessionV2JSON(id: $0) }
-            connection.respondJSON(status: 200, object: ["data": sessions]); return
+            connection.respondJSON(status: 200, jsonArray: sessions); return
         case ("POST", ["api", "session"]):
             let id = nextSessionID()
             // Persiste gli override (title/agent) nel sessionOverrides: la
@@ -376,9 +388,11 @@ final class MockServer {
             registeredSessions.insert(id)
             connection.respondJSON(status: 201, object: sessionV2JSON(id: id)); return
         case ("GET", ["api", "model"]):
-            connection.respondJSON(status: 200, object: ["data": modelsJSON()]); return
+            // Il client decodifica [ModelV2] nudo: niente wrapper {data: ...}.
+            connection.respondJSON(status: 200, jsonArray: modelsJSON()); return
         case ("GET", ["api", "provider"]):
-            connection.respondJSON(status: 200, object: ["data": providersJSON()]); return
+            // Il client decodifica [ProviderV2] nudo.
+            connection.respondJSON(status: 200, jsonArray: providersJSON()); return
         case ("GET", ["api", "permission", "request"]):
             // Il client (OpenCodeAPIClientV2.permissionRequestList) decodifica
             // un array nudo di PermissionRequestV2: niente wrapper {data: ...}.
@@ -650,7 +664,9 @@ final class MockServer {
         if degraded {
             connection.respondJSON(status: 503, object: ["status": "degraded"])
         } else {
-            connection.respondJSON(status: 200, object: ["status": "ok"])
+            // Il server reale risponde {"healthy":true} (APIClient commenta:
+            // "real OpenCode server returns {"healthy":true} on /api/health").
+            connection.respondJSON(status: 200, object: ["healthy": true])
         }
     }
 
@@ -1036,6 +1052,33 @@ final class ClientConnection {
             }
             events.append(("message.updated", server.messageUpdatedData(sessionID: sessionID, fragments: fragments), 0))
             events.append(("session.status", "{\"status\":\"idle\"}", 0))
+
+        case .permissionQuestion:
+            // Eventi REALI del server OpenCode: nomi senza prefisso `session.`
+            // e payload = oggetto completo della richiesta.
+            if after == nil {
+                events.append(("session.status", "{\"status\":\"busy\"}", 0))
+            }
+            let permJSON = server.permissionRequestJSON().first ?? [:]
+            let questionJSON = server.questionRequestJSON().first ?? [:]
+            guard
+                let permData = try? JSONSerialization.data(withJSONObject: permJSON),
+                let questionData = try? JSONSerialization.data(withJSONObject: questionJSON),
+                let permString = String(data: permData, encoding: .utf8),
+                let questionString = String(data: questionData, encoding: .utf8)
+            else {
+                // Payload non serializzabile: non emettere nulla per questi eventi.
+                events.append(("session.status", "{\"status\":\"idle\"}", 0))
+                break
+            }
+            // permString/questionString sono GIÀ JSON validi: passarli grezzi.
+            // (Prima venivano ri-encodati con jsonString → data: era una stringa
+            // quotata → il parser client degradava a sessionUnknown.)
+            events.append(("permission.asked", permString, 0.02))
+            events.append(("question.asked", questionString, 0.02))
+            events.append(("permission.replied", "{\"requestID\":\"req-1\"}", 0.02))
+            events.append(("question.replied", "{\"requestID\":\"q-1\"}", 0.02))
+            events.append(("session.status", "{\"status\":\"idle\"}", 0.02))
         }
 
         let queue = server.queue

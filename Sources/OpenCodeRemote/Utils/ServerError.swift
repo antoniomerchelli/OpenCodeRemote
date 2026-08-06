@@ -180,6 +180,16 @@ extension ServerError {
                 break
             }
         }
+        // HTTP retryable (408/425/429/5xx) → kind .http così `isRetryable`
+        // funziona (prima finivano in .api → mai ritentati).
+        if statusCode == 408 || statusCode == 425 || statusCode == 429 || (500...599).contains(statusCode) {
+            return .http(statusCode)
+        }
+        // 401/403 → autenticazione (mappato a .authentication così la UI
+        // mostra "credenziali scadute" invece di "errore di rete").
+        if statusCode == 401 || statusCode == 403 {
+            return ServerError(kind: .authentication, statusCode: statusCode, message: "Errore HTTP \(statusCode)")
+        }
         return .api("Errore HTTP \(statusCode)", statusCode)
     }
 }

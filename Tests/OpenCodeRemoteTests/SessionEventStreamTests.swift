@@ -16,6 +16,7 @@ final class SessionEventStreamTests: XCTestCase {
 
     override func tearDown() async throws {
         MockURLProtocol.responseHandler = nil
+        MockURLProtocol.neverFinish = false
     }
 
     // MARK: - Parsing Tests (verifica casi enum revert aliases)
@@ -313,5 +314,55 @@ final class SessionEventStreamTests: XCTestCase {
         }
 
         XCTAssertTrue(gotUnknown, "Evento sconosciuto deve diventare sessionUnknown")
+    }
+
+    // MARK: - Watchdog idle (connessione half-open)
+
+    /// Una connessione che resta aperta ma muta (TCP zombie) oltre la soglia
+    /// idle viene chiusa dal watchdog e lo stream riconnette: l'evento della
+    /// generazione successiva deve arrivare, senza che lo stream termini.
+    func testIdleWatchdogReconnectsHalfOpenConnection() async throws {
+        var requestCount = 0
+        MockURLProtocol.responseHandler = { request in
+            requestCount += 1
+            // Prima generazione: risposta 200 ma la connessione NON viene mai
+            // chiusa (half-open) e non produce byte → il watchdog deve
+            // chiuderla. Generazioni successive: evento + chiusura normale.
+            let sse = """
+                id: \(requestCount)
+                event: session.text.delta
+                data: {"partID":"p1","text":"hello-\(requestCount)"}
+
+                """
+            let data = sse.data(using: .utf8)!
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"])!
+            MockURLProtocol.neverFinish = (requestCount == 1)
+            return (data, response, nil)
+        }
+
+        let server = ServerConnection.testConnection()
+        // idleTimeoutMS basso (200ms) per rendere il test veloce: il watchdog
+        // controlla ogni 1s, quindi lo scatto avviene al primo check.
+        let eventStream = await stream.stream(
+            sessionID: "sess-1",
+            server: server,
+            reconnect: true,
+            maxReconnectAttempts: 5,
+            idleTimeoutMS: 200
+        )
+
+        var received: [String] = []
+        for try await event in eventStream {
+            if case let .sessionTextDelta(_, text) = event {
+                received.append(text)
+                if received.count >= 2 { break }
+            }
+        }
+
+        // La gen 1 (muta) non produce eventi; le gen 2+ devono arrivare.
+        XCTAssertEqual(received, ["hello-2", "hello-3"],
+                       "Il watchdog deve chiudere la connessione muta e lo stream deve riconnettere")
+        let reconnectCount = await stream.reconnectCount
+        XCTAssertGreaterThanOrEqual(reconnectCount, 1, "Deve esserci almeno un reconnect causato dal watchdog")
     }
 }

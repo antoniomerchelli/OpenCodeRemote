@@ -385,13 +385,22 @@ public final class AppState: Sendable {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 60_000_000_000)
                 await self?.storePool.evict()
+                // Anche le directory store (una per workspace) vanno evictate:
+                // senza questa chiamata la memoria cresce senza limite con
+                // molti workspace aperti.
+                await self?.directoryManager.evictIfNeeded()
             }
         }
     }
     
-    /// Stacca il percorso v2: ferma l'health monitor e azzera lo stato v2.
+    /// Stacca il percorso v2: ferma l'health monitor, gli stream SSE per-sessione
+    /// e azzera lo stato v2.
     public func disconnectV2() {
         v2ConnectedServer = nil
+        for (_, task) in sessionStreams {
+            task.cancel()
+        }
+        sessionStreams.removeAll()
         Task { await healthMonitor.stop() }
     }
     
@@ -434,8 +443,11 @@ public final class AppState: Sendable {
             throw error
         }
         if let serverMessageID, !serverMessageID.isEmpty {
-            // Il messaggio reale arriverà con l'id del server: rimuovi il placeholder.
-            await store.removeOptimistic(messageID: localID)
+            // Il messaggio reale arriverà via SSE con l'id del server: rimappa
+            // il placeholder su quell'id (non rimuoverlo: se il server assegna
+            // un id diverso dal locale, il messaggio utente sparirebbe dalla
+            // chat finché il turno non termina).
+            await store.remapOptimistic(from: localID, to: serverMessageID)
         } else {
             await store.confirmOptimistic(messageID: localID)
         }
@@ -472,15 +484,16 @@ public final class AppState: Sendable {
     /// Risponde a una domanda v2.
     public func answerQuestion(id: String, sessionID: String, answer: String) async throws {
         let server = try requireV2Server()
-        await apiV2.setServer(server)
-        try await apiV2.questionReply(QuestionReplyV2(sessionID: sessionID, requestID: id, answers: [answer]))
+        try await compat.questionReply(
+            server: server,
+            reply: QuestionReplyV2(sessionID: sessionID, requestID: id, answers: [answer])
+        )
     }
 
     /// Rifiuta una domanda v2 (`question.reject`).
     public func declineQuestion(id: String, sessionID: String) async throws {
         let server = try requireV2Server()
-        await apiV2.setServer(server)
-        try await apiV2.questionReject(sessionID: sessionID, requestID: id)
+        try await compat.questionReject(server: server, sessionID: sessionID, requestID: id)
     }
 
     /// Permessi v2 in attesa, filtrati per sessione (best-effort: `[]` in errore).
@@ -519,7 +532,16 @@ public final class AppState: Sendable {
     public func subscribeSessionMessages(sessionID: String) -> AsyncStream<SessionStoreSnapshot> {
         AsyncStream { continuation in
             let task = Task { await self.runSessionMessageSubscription(sessionID: sessionID, continuation: continuation) }
-            continuation.onTermination = { _ in task.cancel() }
+            // Traccia il task per-sessione: `disconnectV2()` lo cancella così
+            // lo stream SSE non continua a riconnettersi verso un server spento
+            // quando l'utente disconnette con la chat ancora aperta.
+            sessionStreams[sessionID] = task
+            continuation.onTermination = { _ in
+                task.cancel()
+                Task { @MainActor [weak self] in
+                    self?.sessionStreams.removeValue(forKey: sessionID)
+                }
+            }
         }
     }
 
@@ -549,7 +571,17 @@ public final class AppState: Sendable {
         var merged = activeSessions
         for session in incoming {
             if let idx = merged.firstIndex(where: { $0.id == session.id }) {
-                merged[idx] = session
+                // Preserva status e messageCount reali già noti (arrivano dal
+                // feed SSE v1 o dal polling): il mapping v2 hardcoda .idle/0 e
+                // sovrascriverli farebbe sembrare ogni sessione "inattiva".
+                var existing = merged[idx]
+                existing.title = session.title
+                existing.agentId = session.agentId
+                existing.modelId = session.modelId
+                existing.createdAt = session.createdAt
+                existing.updatedAt = session.updatedAt
+                existing.directory = session.directory
+                merged[idx] = existing
             } else {
                 merged.append(session)
             }
@@ -626,15 +658,22 @@ public final class AppState: Sendable {
             }
             
         case .permissionAsked(let permission):
+            // Dedup per id: il reconnect SSE v1 riproduce lo storico e lo
+            // stesso permesso arriverebbe N volte.
+            pendingPermissions.removeAll { $0.id == permission.id }
             pendingPermissions.append(permission)
             
         case .permissionReplied(let permission):
             pendingPermissions.removeAll { $0.id == permission.id }
             
         case .questionAsked(let question):
+            pendingQuestions.removeAll { $0.id == question.id }
             pendingQuestions.append(question)
             
         case .questionReplied(let question):
+            pendingQuestions.removeAll { $0.id == question.id }
+
+        case .questionRejected(let question):
             pendingQuestions.removeAll { $0.id == question.id }
             
         case .healthUpdate(let health):

@@ -93,6 +93,16 @@ workspaceRow(
                                     set: { appState.settings.enableHaptics = $0; appState.saveSettings() }
                                 )
                             )
+                            Divider().background(SaharaColors.outlineVariant.opacity(0.6))
+                            saharaToggleRow(
+                                icon: "faceid",
+                                title: "Blocco Face ID",
+                                hint: "Richiedi Face ID all'avvio e al ritorno in primo piano",
+                                isOn: Binding(
+                                    get: { appState.settings.requireFaceID },
+                                    set: { appState.settings.requireFaceID = $0; appState.saveSettings() }
+                                )
+                            )
                         }
                         .background(SaharaColors.surfaceContainerLowest)
                         .overlay(

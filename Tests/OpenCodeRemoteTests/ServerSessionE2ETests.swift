@@ -106,10 +106,119 @@ final class ServerSessionE2ETests: XCTestCase {
         XCTAssertEqual(snapshot.status, .idle)
     }
 
+    /// Gli eventi reali del server OpenCode NON hanno il prefisso `session.`
+    /// (`permission.asked`, `question.asked`, ...) e trasportano l'intero
+    /// oggetto PermissionRequest/Question, non solo `{"requestID": ...}`.
+    /// Regression test: il parser deve riconoscerli e popolare i pendingID.
+    func testSSERealEventNamesWithoutSessionPrefix() async throws {
+        MockURLProtocol.responseHandler = { request in
+            let sse = """
+                id: 1
+                event: session.status
+                data: {"status":"working"}
+
+                id: 2
+                event: permission.asked
+                data: {"id":"req-9","requestID":"req-9","sessionID":"sess-1","messageID":"msg-2","callID":"call-1","tool":"bash","input":{"command":"ls -la"},"type":"request","responded":false}
+
+                id: 3
+                event: question.asked
+                data: {"id":"q-9","requestID":"q-9","sessionID":"sess-1","messageID":"msg-2","prompt":"Permetti l'esecuzione?","options":["Once","Always","Never"],"allowFreeText":false}
+
+                id: 4
+                event: permission.replied
+                data: {"requestID":"req-9"}
+
+                id: 5
+                event: question.replied
+                data: {"requestID":"q-9"}
+
+                id: 6
+                event: session.status
+                data: {"status":"idle"}
+
+                """
+            let data = sse.data(using: .utf8)!
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"])!
+            return (data, response, nil)
+        }
+
+        let server = ServerConnection.testConnection()
+        let store = ServerSessionStore(sessionID: "sess-1", api: OpenCodeAPIClientV2())
+        let eventStream = await stream.stream(sessionID: "sess-1", server: server, reconnect: false, maxReconnectAttempts: 0)
+
+        for try await event in eventStream {
+            await store.apply(event)
+        }
+
+        let snapshot = await store.snapshot()
+
+        // L'evento `permission.replied` (arrivato dopo `asked`) rimuove l'ID,
+        // quindi per verificare la cattura del `asked` serve uno store separato
+        // senza gli eventi di reply.
+        XCTAssertEqual(snapshot.pendingPermissionIDs, [])
+        XCTAssertEqual(snapshot.pendingQuestionIDs, [])
+        XCTAssertEqual(snapshot.status, .idle)
+
+        // Verifica isolata: solo `asked` (senza reply) deve lasciare i pending.
+        MockURLProtocol.responseHandler = { request in
+            let sse = """
+                id: 1
+                event: permission.asked
+                data: {"id":"req-9","requestID":"req-9","sessionID":"sess-1"}
+
+                id: 2
+                event: question.asked
+                data: {"id":"q-9","requestID":"q-9","sessionID":"sess-1"}
+
+                """
+            let data = sse.data(using: .utf8)!
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"])!
+            return (data, response, nil)
+        }
+
+        let store2 = ServerSessionStore(sessionID: "sess-1", api: OpenCodeAPIClientV2())
+        let eventStream2 = await stream.stream(sessionID: "sess-1", server: server, reconnect: false, maxReconnectAttempts: 0)
+        for try await event in eventStream2 {
+            await store2.apply(event)
+        }
+        let snapshot2 = await store2.snapshot()
+        XCTAssertTrue(snapshot2.pendingPermissionIDs.contains("req-9"))
+        XCTAssertTrue(snapshot2.pendingQuestionIDs.contains("q-9"))
+    }
+
+    /// `question.rejected` (nome reale, senza prefisso) deve rimuovere la
+    /// pending question come `question.replied`.
+    func testSSEQuestionRejectedRemovesPending() async throws {
+        MockURLProtocol.responseHandler = { request in
+            let sse = """
+                id: 1
+                event: question.asked
+                data: {"id":"q-7","requestID":"q-7","sessionID":"sess-1"}
+
+                id: 2
+                event: question.rejected
+                data: {"requestID":"q-7"}
+
+                """
+            let data = sse.data(using: .utf8)!
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"])!
+            return (data, response, nil)
+        }
+
+        let server = ServerConnection.testConnection()
+        let store = ServerSessionStore(sessionID: "sess-1", api: OpenCodeAPIClientV2())
+        let eventStream = await stream.stream(sessionID: "sess-1", server: server, reconnect: false, maxReconnectAttempts: 0)
+        for try await event in eventStream {
+            await store.apply(event)
+        }
+        let snapshot = await store.snapshot()
+        XCTAssertFalse(snapshot.pendingQuestionIDs.contains("q-7"))
+    }
+
     /// Round-trip `prompt`: POST /api/session/:id/prompt → risposta mockata
     /// decodificata come MessageV2DTO.
-    func testPromptRoundTrip() async throws {
-        MockURLProtocol.responseHandler = { request in
+    func testPromptRoundTrip() async throws {        MockURLProtocol.responseHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
             XCTAssertTrue(request.url?.path.hasSuffix("/api/session/sess-1/prompt") ?? false)
 

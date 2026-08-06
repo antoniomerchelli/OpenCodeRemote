@@ -15,8 +15,7 @@ import Foundation
 // - `status()`: lettura pull con cache (fonte singola, evita stampede);
 // - `statusStream()`: `AsyncStream<ServerHealth?>` che emette il valore
 //   corrente all'iscrizione e ogni successivo cambiamento rilevato dal poll.
-//   Un solo stream attivo per volta: una nuova sottoscrizione sostituisce la
-//   precedente.
+//   Multi-consumer: ogni sottoscrizione riceve i tick in modo indipendente.
 //
 // Cancellazione pulita: `stop()` cancella il task di polling (il
 // `Task.sleep` della coda è cancellabile) e chiude lo stream.
@@ -33,8 +32,10 @@ public actor HealthMonitor {
     private var currentServer: ServerConnection?
     private var cachedStatus: ServerHealth?
     private var lastCheckAt: Date?
-    private var streamContinuation: AsyncStream<ServerHealth?>.Continuation?
-    private var streamToken: UUID?
+    /// Multi-consumer: ogni sottoscrizione a `statusStream()` riceve i tick.
+    /// (Prima un solo stream: la seconda view iscritta chiudeva la prima →
+    /// lista sessioni congelata con Dashboard + SessionsListView vive.)
+    private var streamContinuations: [UUID: AsyncStream<ServerHealth?>.Continuation] = [:]
     private var hasEmitted = false
 
     public init() {}
@@ -52,13 +53,15 @@ public actor HealthMonitor {
     }
 
     /// Ferma il task di polling corrente (cancellazione cooperativa) e
-    /// chiude lo stream. `status()` continua a rispondere con l'ultimo
+    /// chiude tutti gli stream. `status()` continua a rispondere con l'ultimo
     /// valore noto.
     public func stop() {
         pollTask?.cancel()
         pollTask = nil
-        streamContinuation?.finish()
-        streamContinuation = nil
+        for (_, continuation) in streamContinuations {
+            continuation.finish()
+        }
+        streamContinuations.removeAll()
         hasEmitted = false
         currentServer = nil
     }
@@ -81,7 +84,8 @@ public actor HealthMonitor {
     }
 
     /// Stato pubblicato: emette il valore corrente all'iscrizione e poi ogni
-    /// cambiamento rilevato dal polling. Un solo consumatore attivo.
+    /// cambiamento rilevato dal polling. Multi-consumer: ogni sottoscrizione
+    /// riceve i tick in modo indipendente.
     public func statusStream() -> AsyncStream<ServerHealth?> {
         AsyncStream { continuation in
             // La Task eredita l'isolamento dell'actor: `attach` è chiamata
@@ -101,7 +105,9 @@ public actor HealthMonitor {
             cachedStatus = result
             if changed {
                 hasEmitted = true
-                streamContinuation?.yield(result)
+                for (_, continuation) in streamContinuations {
+                    continuation.yield(result)
+                }
             }
             try? await Task.sleep(nanoseconds: intervalNS)
         }
@@ -169,14 +175,8 @@ public actor HealthMonitor {
     // MARK: - Stream
 
     private func attach(_ continuation: AsyncStream<ServerHealth?>.Continuation) {
-        // Un solo stream attivo: una nuova sottoscrizione sostituisce la
-        // precedente.
-        if let old = streamContinuation {
-            old.finish()
-        }
         let token = UUID()
-        streamToken = token
-        streamContinuation = continuation
+        streamContinuations[token] = continuation
         continuation.yield(cachedStatus)
         continuation.onTermination = { [weak self] _ in
             Task { await self?.detach(token) }
@@ -184,9 +184,6 @@ public actor HealthMonitor {
     }
 
     private func detach(_ token: UUID) {
-        if streamToken == token {
-            streamToken = nil
-            streamContinuation = nil
-        }
+        streamContinuations.removeValue(forKey: token)
     }
 }

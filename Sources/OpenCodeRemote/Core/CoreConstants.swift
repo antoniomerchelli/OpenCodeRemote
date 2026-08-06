@@ -15,6 +15,14 @@ public enum CoreConstants {
     public static let streamReconnectDelayMS: Int = 250
     /// Backoff massimo di riconnessione (usato da PTY).
     public static let streamReconnectMaxBackoffMS: Int = 4_000
+    /// Timeout di connessione per i tentativi di reconnect dello stream SSE:
+    /// un IP black-hole (SYN drop) non deve tenere il tentativo appeso per il
+    /// timeout TCP di sistema (~60-75s) prima di ritentare.
+    public static let streamConnectTimeoutMS: Int = 10_000
+    /// Idle timeout dello stream SSE: se non arriva alcun byte per questo
+    /// intervallo la connessione è considerata half-open (TCP zombie dopo
+    /// sleep/wake o cambio rete) e viene chiusa per forzare il reconnect.
+    public static let streamIdleTimeoutMS: Int = 60_000
 
     // MARK: Health (da utils/server-health.ts)
     /// Intervallo di polling dello stato del server.

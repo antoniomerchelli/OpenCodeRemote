@@ -157,6 +157,48 @@ public actor SessionEventStream {
         var lastSeenRawID: String?
     }
 
+    /// Stato condiviso tra il loop di `run` e il watchdog idle: `lastActivity`
+    /// viene aggiornato a ogni byte ricevuto da `consume`, `isStreaming` è true
+    /// solo mentre una connessione è attiva (non durante i reconnect). Accesso
+    /// cross-task → `@unchecked Sendable` con lock.
+    private final class IdleWatchState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _lastActivity = Date()
+        private var _isStreaming = false
+        private var _watchdogFired = false
+
+        var lastActivity: Date {
+            get { lock.withLock { _lastActivity } }
+            set { lock.withLock { _lastActivity = newValue } }
+        }
+
+        var isStreaming: Bool {
+            get { lock.withLock { _isStreaming } }
+            set { lock.withLock { _isStreaming = newValue } }
+        }
+
+        /// Il watchdog ha scattato (connessione muta oltre la soglia).
+        func markWatchdogFired() {
+            lock.withLock { _watchdogFired = true }
+        }
+
+        /// Legge e resetta il flag watchdog (una tantum per scatto).
+        func consumeWatchdogFired() -> Bool {
+            lock.withLock {
+                let fired = _watchdogFired
+                _watchdogFired = false
+                return fired
+            }
+        }
+    }
+
+    /// Box per il task di connessione della generazione corrente: il watchdog
+    /// la usa per cancellare SOLO la connessione, senza uccidere il loop di
+    /// reconnect di `run`.
+    private final class ConnectionTaskBox: @unchecked Sendable {
+        var task: Task<Bool, Error>?
+    }
+
     // MARK: - Streaming attivo (layer di coalescenza della chiamata corrente)
 
     /// Coalescer della chiamata `stream(...)` attualmente attiva: referenziato
@@ -199,6 +241,7 @@ public actor SessionEventStream {
         after: String? = nil,
         reconnect: Bool = true,
         maxReconnectAttempts: Int? = nil,
+        idleTimeoutMS: Int = CoreConstants.streamIdleTimeoutMS,
         onAfterChanged: (@Sendable (String) -> Void)? = nil
     ) -> AsyncThrowingStream<ServerEventV2, Error> {
         let (stream, continuation) = AsyncThrowingStream<ServerEventV2, Error>.makeStream()
@@ -232,7 +275,8 @@ public actor SessionEventStream {
                 onAfterChanged: onAfterChanged,
                 continuation: continuation,
                 coalescer: coalescer,
-                cursor: StreamCursorState()
+                cursor: StreamCursorState(),
+                idleTimeoutMS: idleTimeoutMS
             )
             await self.teardown(
                 coalescer: coalescer,
@@ -275,38 +319,91 @@ public actor SessionEventStream {
         onAfterChanged: (@Sendable (String) -> Void)?,
         continuation: AsyncThrowingStream<ServerEventV2, Error>.Continuation,
         coalescer: EventCoalescer,
-        cursor: StreamCursorState
+        cursor: StreamCursorState,
+        idleTimeoutMS: Int
     ) async {
         var cursorValue = initialAfter
         var retryHintMS: Int? = nil
 
+        // Watchdog idle: una connessione half-open (TCP zombie dopo sleep/wake,
+        // cambio Wi-Fi o NAT timeout) non produce mai errori → senza questo
+        // controllo lo stream resterebbe "vivo" ma muto per sempre. Se non
+        // arriva alcun byte per `streamIdleTimeoutMS` con connessione attiva,
+        // il watchdog cancella SOLO il task di connessione della generazione
+        // corrente → la generazione termina come se la connessione fosse
+        // caduta → il loop la vede e riconnette (stesso percorso di un
+        // errore retryable).
+        let idleState = IdleWatchState()
+        let connectionBox = ConnectionTaskBox()
+        let watchdogTask = Task {
+            let checkIntervalNS = UInt64(1_000_000_000)
+            let idleThreshold = TimeInterval(idleTimeoutMS) / 1000
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: checkIntervalNS)
+                if Task.isCancelled { break }
+                guard idleState.isStreaming else { continue }
+                if Date().timeIntervalSince(idleState.lastActivity) > idleThreshold {
+                    idleState.markWatchdogFired()
+                    connectionBox.task?.cancel()
+                }
+            }
+        }
+
         while !Task.isCancelled {
             generation += 1
 
-            do {
-                let request = try makeRequest(sessionID: sessionID, server: server, after: cursorValue)
-                let (bytes, response) = try await session.bytes(for: request)
+            // Task di connessione della generazione: isolato così il watchdog
+            // può cancellarlo senza uccidere il loop di reconnect.
+            let afterValue = cursorValue
+            let connectionTask = Task { () -> Bool in
+                do {
+                    let request = try makeRequest(sessionID: sessionID, server: server, after: afterValue)
+                    let (bytes, response) = try await session.bytes(for: request)
 
-                guard let http = response as? HTTPURLResponse else {
-                    throw ServerError(kind: .invalidResponse, message: "Risposta HTTP non valida")
-                }
-                guard (200...299).contains(http.statusCode) else {
-                    var body = Data()
-                    for try await chunk in bytes.prefix(8_192) {
-                        body.append(chunk)
+                    guard let http = response as? HTTPURLResponse else {
+                        throw ServerError(kind: .invalidResponse, message: "Risposta HTTP non valida")
                     }
-                    throw ServerError.fromResponse(statusCode: http.statusCode, body: body)
-                }
+                    guard (200...299).contains(http.statusCode) else {
+                        var body = Data()
+                        for try await chunk in bytes.prefix(8_192) {
+                            body.append(chunk)
+                        }
+                        throw ServerError.fromResponse(statusCode: http.statusCode, body: body)
+                    }
 
-                let connectionEnded = try await consume(
-                    bytes: bytes,
-                    onAfterChanged: onAfterChanged,
-                    retryHint: &retryHintMS,
-                    coalescer: coalescer,
-                    cursor: cursor
-                )
+                    idleState.isStreaming = true
+                    idleState.lastActivity = Date()
+                    let ended = try await consume(
+                        bytes: bytes,
+                        onAfterChanged: onAfterChanged,
+                        retryHint: &retryHintMS,
+                        coalescer: coalescer,
+                        cursor: cursor,
+                        idleState: idleState
+                    )
+                    idleState.isStreaming = false
+                    return ended
+                } catch {
+                    idleState.isStreaming = false
+                    throw error
+                }
+            }
+            connectionBox.task = connectionTask
+
+            do {
+                let connectionEnded = try await connectionTask.value
 
                 if Task.isCancelled { break }
+
+                // Il watchdog ha chiuso la connessione muta: ricomincia.
+                if idleState.consumeWatchdogFired() {
+                    reconnectCount += 1
+                    cursorValue = cursor.lastSeenRawID
+                    let delay = nextReconnectDelayMS(try: reconnectCount, retryHint: retryHintMS)
+                    try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
+                    continue
+                }
+
                 guard connectionEnded else { break }
 
                 // Lo stream è terminato (il server ha chiuso): decide se riconnettere.
@@ -322,6 +419,17 @@ public actor SessionEventStream {
 
             } catch {
                 if Task.isCancelled { break }
+                idleState.isStreaming = false
+
+                // Stesso percorso del watchdog: la generazione è stata chiusa
+                // perché la connessione era muta → riconnetti.
+                if idleState.consumeWatchdogFired() {
+                    reconnectCount += 1
+                    cursorValue = cursor.lastSeenRawID
+                    let delay = nextReconnectDelayMS(try: reconnectCount, retryHint: retryHintMS)
+                    try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000)
+                    continue
+                }
 
                 let serverError = ServerError.normalize(error)
                 let retryable = serverError.isRetryable
@@ -340,6 +448,7 @@ public actor SessionEventStream {
                 break
             }
         }
+        watchdogTask.cancel()
     }
 
     /// Chiude in modo pulito il layer di coalescenza quando lo stream termina
@@ -377,7 +486,8 @@ public actor SessionEventStream {
         onAfterChanged: (@Sendable (String) -> Void)?,
         retryHint: inout Int?,
         coalescer: EventCoalescer,
-        cursor: StreamCursorState
+        cursor: StreamCursorState,
+        idleState: IdleWatchState
     ) async throws -> Bool {
         var currentEvent = ""
         var currentData = ""
@@ -422,6 +532,8 @@ public actor SessionEventStream {
         }
 
         for try await byte in bytes {
+            // Qualsiasi byte ricevuto = connessione viva: resetta il watchdog.
+            idleState.lastActivity = Date()
             if byte == 0x0A {
                 let line = String(decoding: pendingData, as: UTF8.self)
                 pendingData.removeAll(keepingCapacity: true)
@@ -561,19 +673,40 @@ public actor SessionEventStream {
         case "session.compaction.failed":
             return .sessionCompactionFailed(message: string(in: payload, for: ["message", "error"]))
 
-        case "session.permission.asked":
-            return .sessionPermissionAsked(requestID: string(in: payload, for: ["requestID", "id"]) ?? "")
-        case "session.permission.replied":
-            return .sessionPermissionReplied(requestID: string(in: payload, for: ["requestID", "id"]) ?? "")
+        // NOTA: il server reale invia questi eventi SENZA il prefisso `session.`
+        // (`permission.asked`, `question.asked`, ...). I nomi con prefisso sono
+        // accettati per retro-compatibilità con il mock server e versioni precedenti.
+        // Un event con requestID assente/vuoto viene scartato (sessionUnknown):
+        // altrimenti la pending card avrebbe un ID vuoto e non verrebbe mai
+        // rimossa dall'evento replied/rejected reale.
+        case "session.permission.asked", "permission.asked":
+            guard let requestID = requestID(in: payload), !requestID.isEmpty else {
+                return .sessionUnknown(name: name, data: payload)
+            }
+            return .sessionPermissionAsked(requestID: requestID)
+        case "session.permission.replied", "permission.replied":
+            guard let requestID = requestID(in: payload), !requestID.isEmpty else {
+                return .sessionUnknown(name: name, data: payload)
+            }
+            return .sessionPermissionReplied(requestID: requestID)
 
-        case "session.question.asked":
-            return .sessionQuestionAsked(requestID: string(in: payload, for: ["requestID", "id"]) ?? "")
-        case "session.question.replied":
-            return .sessionQuestionReplied(requestID: string(in: payload, for: ["requestID", "id"]) ?? "")
-        case "session.question.rejected":
-            return .sessionQuestionRejected(requestID: string(in: payload, for: ["requestID", "id"]) ?? "")
+        case "session.question.asked", "question.asked":
+            guard let requestID = requestID(in: payload), !requestID.isEmpty else {
+                return .sessionUnknown(name: name, data: payload)
+            }
+            return .sessionQuestionAsked(requestID: requestID)
+        case "session.question.replied", "question.replied":
+            guard let requestID = requestID(in: payload), !requestID.isEmpty else {
+                return .sessionUnknown(name: name, data: payload)
+            }
+            return .sessionQuestionReplied(requestID: requestID)
+        case "session.question.rejected", "question.rejected":
+            guard let requestID = requestID(in: payload), !requestID.isEmpty else {
+                return .sessionUnknown(name: name, data: payload)
+            }
+            return .sessionQuestionRejected(requestID: requestID)
 
-        case "session.todo.updated":
+        case "session.todo.updated", "todo.updated":
             if let todo = try? decoder.decode(TodoV2.self, from: payload) {
                 return .sessionTodoUpdated(todo: todo)
             }
@@ -707,6 +840,22 @@ public actor SessionEventStream {
         return nil
     }
 
+    /// Estrae il `requestID` di un evento permission/question. Il payload reale
+    /// del server può essere sia l'oggetto piatto (`{"requestID": "..."}`,
+    /// `{"id": "..."}`) sia l'oggetto completo della richiesta con il campo in
+    /// vari punti (`request`, `permission`, `data`, `body`).
+    private func requestID(in data: Data) -> String? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        if let direct = obj["requestID"] as? String ?? obj["id"] as? String { return direct }
+        for key in ["request", "permission", "data", "body"] {
+            if let nested = obj[key] as? [String: Any],
+               let nestedID = nested["requestID"] as? String ?? nested["id"] as? String {
+                return nestedID
+            }
+        }
+        return nil
+    }
+
     // MARK: - Request / backoff
 
     private func makeRequest(sessionID: String, server: ServerConnection, after: String?) throws -> URLRequest {
@@ -724,7 +873,10 @@ public actor SessionEventStream {
         if let auth = server.authHeader {
             request.setValue(auth, forHTTPHeaderField: "Authorization")
         }
-        request.timeoutInterval = TimeInterval(INT_MAX)
+        // Timeout di CONNESSIONE (non INT_MAX): un IP black-hole (SYN drop)
+        // non deve tenere il tentativo appeso per il timeout TCP di sistema
+        // (~60-75s) prima di ritentare il reconnect.
+        request.timeoutInterval = TimeInterval(CoreConstants.streamConnectTimeoutMS) / 1000
         return request
     }
 

@@ -171,6 +171,34 @@ public actor CompatibleAPI {
             try await v2.permissionReply(reply)
         }
     }
+
+    // MARK: - Domande
+
+    /// `POST /session/:id/question/:qid/answer` (v1) / `POST /api/question/request/:id/reply` (v2).
+    public func questionReply(server: ServerConnection, reply: QuestionReplyV2) async throws {
+        await configure(server: server)
+        switch await protocolVersion(for: server) {
+        case .v1:
+            try await v1.answerQuestion(
+                SessionID(rawValue: reply.sessionID),
+                questionId: reply.requestID,
+                response: reply.answers.joined(separator: "\n")
+            )
+        case .v2:
+            try await v2.questionReply(reply)
+        }
+    }
+
+    /// `POST /session/:id/question/:qid/decline` (v1) / `POST /api/question/request/:id/reject` (v2).
+    public func questionReject(server: ServerConnection, sessionID: String, requestID: String) async throws {
+        await configure(server: server)
+        switch await protocolVersion(for: server) {
+        case .v1:
+            try await v1.declineQuestion(SessionID(rawValue: sessionID), questionId: requestID)
+        case .v2:
+            try await v2.questionReject(sessionID: sessionID, requestID: requestID)
+        }
+    }
 }
 
 // MARK: - Convertitori minimi v1 → DTO v2

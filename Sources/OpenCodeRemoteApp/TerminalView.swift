@@ -150,6 +150,24 @@ final class TerminalViewModel {
         ))
     }
 
+    /// Resetta l'output quando cambia la sessione attiva: lo stato del
+    /// terminale non deve essere condiviso tra sessioni diverse.
+    func resetForSessionChange() {
+        isExecuting = false
+        currentInput = ""
+        entries.removeAll()
+        entries.append(TerminalEntry(
+            segments: [ANSIStyledSegment(text: "OpenCodeRemote Terminal v1.0")],
+            isCommand: false,
+            isError: false
+        ))
+        entries.append(TerminalEntry(
+            segments: [ANSIStyledSegment(text: "Sessione cambiata: esegui un comando per iniziare.")],
+            isCommand: false,
+            isError: false
+        ))
+    }
+
     func executeCommand(_ command: String, sessionId: SessionID, apiClient: V1OpenCodeAPIClient) async {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -242,17 +260,33 @@ struct TerminalView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            terminalOutput
-            if viewModel.isSplitView {
-                extendedKeyboard
+            if activeSessionId == nil {
+                // Nessuna sessione attiva: il terminale non può eseguire nulla.
+                // Prima era un no-op silenzioso su Send.
+                EmptyStateView(
+                    icon: "terminal",
+                    title: "Nessuna sessione attiva",
+                    description: "Apri una sessione dalla lista per usare il terminale.",
+                    action: nil
+                )
+            } else {
+                terminalOutput
+                if viewModel.isSplitView {
+                    extendedKeyboard
+                }
+                inputBar
             }
-            inputBar
         }
         .background(SaharaColors.background)
         // Margine per la SaharaBottomNav overlay.
         .padding(.bottom, 80)
         .sheet(isPresented: $viewModel.showHistory) {
             historySheet
+        }
+        // Stato terminale condiviso tra sessioni: al cambio di sessione attiva
+        // l'output del terminale precedente non deve restare visibile.
+        .onChange(of: activeSessionId) { _, newID in
+            viewModel.resetForSessionChange()
         }
     }
 }

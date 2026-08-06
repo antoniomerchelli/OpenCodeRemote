@@ -1394,6 +1394,7 @@ public enum SSEEvent: Equatable, Hashable, Sendable {
     case permissionReplied(PermissionRequest)
     case questionAsked(Question)
     case questionReplied(Question)
+    case questionRejected(Question)
     case agentInvoked(AgentID, SessionID)
     case toolCallStarted(ToolCallPart)
     case toolCallCompleted(ToolResultPart)

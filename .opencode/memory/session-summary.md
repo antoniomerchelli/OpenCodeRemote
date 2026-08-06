@@ -1,35 +1,21 @@
 # OpenCode Remote — Session Summary
 
-## Stato attuale (al 3 Ago 2026 — Sessione 11)
-- **VERIFICA TOTALE A TUTTI I LIVELLI — COMPLETATA E TUTTO VERDE**: `swift build` OK (0 errori, 0 warning), `swift test` **79/79 verdi** (2 nuovi test: A2 isolamento stream paralleli, A4 204 body vuoto), `xcodebuild` simulatore iOS **BUILD SUCCEEDED**, **audit funzionale e2e 101 check 0 bug STABILE**, **audit UI ~200 incongruenze corrette**, **zero icone Material non mappate**, **audit core 4 ALTA fixati**, **audit sicurezza PULITE**.
-- **Funzionale e2e (subagent stress)**: MockServer + harness `OpenCodeWidgets` (detect, session-create, prompt, stream, revert, pty, health) + framework `OpenCodeRemote` — 101 check su 9 scenari (burst50, reconnect multipli, error/degraded, delta50, PTY 5 paralleli, sessioni multiple + stream paralleli, riavvio server kill+restart, concorrenza 2 prompt) — **STABILE**, coalescenza burst 50→1 evento, anti-doppioni post-reconnect, backoff cap 4s.
-- **Audit UI → correzioni applicate (~203 sostituzioni + fusioni)**: icone (chevron_right mappato), colori raw→token (18), foregroundColor(.primary/.secondary)→onSurface/onSurfaceVariant (33+), bypass monospaced→SaharaFont.mono (17), dimensioni spurie normalizzate (31), radius fuori scala→token (14), spacing/padding magici→token (54), ombre→saharaShadow (2), fusioni componenti (SearchBarField→NeutralSearchBar, StatusChipView/SectionCard allineati), codice morto rimosso (ThinkingBubble, ToolCallCard). Zero icone non mappate, zero componenti morti residui.
-- **Audit logica core — 4 ALTA FIXATI**:
-  - A1: reconnect SSE v1 automatico con backoff esponenziale (AppState.connect)
-  - A2: anti-doppioni per-chiamata in SessionEventStream (stream paralleli isolati) + test `testParallelStreamsDoNotShareDedupState`
-  - A3: onTermination su subscribeSessions (AppState) — niente leak subscriber
-  - A4: 204 body vuoto accettato in performNoContent + test `testNoContentEndpointAcceptsEmpty204`
-  - Extra: AppIntents cablati (IntentService.shared.appState), foreground reconnect SSE, dedup sessioni (sessionCreated)
-- **Audit sicurezza/robustezza — PULITE**: 0 try!/as!/fatalError/precondition/assert, 0 segreti nei log, client v2 errori normalizzati. Note: keychain non atomica, password in AppSettings Codable, no gestione 403.
-- **Fix UI CRITICI IN CORSO** (delegati a subagent, build+test verdi dopo fix core):
-  - Bottom nav padding chat/terminale
-  - Retry chat (subscriptionTask = nil a fine stream)
-  - "Collega ora" finto disabilitato
-  - Toggle autoSave/telemetry rimossi
-  - Selettore ragionamento rimosso
-  - Empty state v1 messaggio chiaro
-  - Double sheet unificato
-  - Accessibility labels bottoni icona-only
+## Stato attuale (al 5 Ago 2026 — Sessione 12)
+- **BUG CRITICO UTENTE "non mi fa inviare e ricevere le domande/permessi a OpenCode" — RISOLTO E VERIFICATO**: causa radice = il server OpenCode reale emette eventi SSE `permission.asked`, `permission.replied`, `question.asked`, `question.replied`, `question.rejected` **SENZA prefisso `session.`**, mentre il parser (SessionEventStream.makeEvent) gestiva solo `session.*` → eventi reali cadevano in `.sessionUnknown` → dock permessi/domande mai popolato. Fix completo su 7 file (vedi log sessione sotto).
+- **TUTTO VERDE dopo il fix**: `swift build` pulito (0 errori, 0 warning), `swift test` **81/81 verdi** (2 nuovi E2E: nomi eventi reali senza prefisso, question.rejected rimuove pending), `Tools/MockServer` compila. **Red team (code-reviewer) eseguito: zero [CRITICO]**; note accettate risolte, 3 note minori accettate come comportamenti voluti.
+- Ereditato dalla Sessione 11 (resta valido): audit funzionale e2e 101 check STABILE, audit UI ~200 incongruenze corrette, audit core 4 ALTA fixati (A1 reconnect SSE v1, A2 anti-doppioni per-chiamata, A3 onTermination, A4 204 body vuoto), audit sicurezza PULITE (0 try!/as!/fatalError, 0 segreti nei log), xcodebuild simulatore iOS SUCCEEDED.
 
 ## Prossimi passi consigliati
-1. **Completare i fix UI delegati** (subagent in corso) e verificare build+test finali.
-2. **Prove manuali su simulatore/device** con mock server reale (streaming, permessi, domande, tool call) — validazione end-to-end della UI v2 ora che il percorso v2 è cablato a runtime.
-3. **Decidere il destino di `FileExplorerView.swift` e `AgentViews.swift`** (ORFANI: nessuna tab li usa; `MainTabView` ha solo Dashboard/Sessions/Terminal/Settings). L'audit citava "riattivare AgentFileExplorer nelle tab" ma il file non esiste più. NON aggiunte tab nuove (cambiamento UX non richiesto esplicitamente).
-4. Migrazione graduale dei call site UI v1 al percorso v2 (SessionDetailView/TerminalView/AgentViews).
+1. **Commit delle modifiche della Sessione 12** (il progetto NON è un repo git: chiedere all'utente come vuole procedere).
+2. **Test reale contro il server OpenCode**: avviare il mock con `--scenario permission-question` e verificare nel dock che permessi/domande arrivino e risposte/rifiuti funzionino.
+3. **Verifica `xcodebuild` su simulatore iOS** dopo il fix (build SwiftPM già verde, manca la conferma lato Xcode).
+4. **Eventuale aggiornamento della UI v1 legacy** (SessionDetailView) per sfruttare il percorso v2 ora che gli eventi reali arrivano.
 5. **Deploy su iPhone** (obiettivo utente finale): `export DEVELOPMENT_TEAM=<team-id>` + `./setup_xcode_project.sh` + run da Xcode sul dispositivo.
+6. **Decidere il destino di `FileExplorerView.swift` e `AgentViews.swift`** (ORFANI: nessuna tab li usa; `MainTabView` ha solo Dashboard/Sessions/Terminal/Settings) + migrazione graduale call site UI v1 al percorso v2.
 
 ## Problemi aperti / blocchi
-- **Nessun blocco.** Note: mock id condivisi tra 2 stream paralleli sulla stessa sessione → sequenze interleaved (non bloccante, solo test paralleli da evitare).
+- **Nessun blocco.** Note residue accettate dal red team (comportamenti voluti): card minime "Domanda in attesa" se il server è lento a popolare i dettagli (refetch con budget di 3 tentativi); refetch-per-snapshot nel caso parziale pre-esistente; il mock su reconnect riemette eventi `*.asked` (uguale agli altri scenari).
+- Note note precedenti: mock id condivisi tra 2 stream paralleli → sequenze interleaved (non bloccante, evitare test paralleli).
 - **Dynamic Type non supportato** (limite SDK/toolchain: `Font.relativeTo` inesistente).
 - **Contrasto AA borderline**: `secondary` #78706A su background ~4:1 (testo piccolo) — non modificato per non cambiare il brand.
 - App su dispositivo fisico richiede il Team ID Apple dell'utente (non possibile da CLI senza credenziali).
@@ -41,13 +27,20 @@
 - **Il decoder client v2 usa `.iso8601` per le Date** → nei fixture JSON le date vanno come stringhe ISO8601, non epoch.
 - **OpenCodeAPIClientV2 ha `init(session: URLSession = .shared)`** → nei test iniettare URLSession con MockURLProtocol.
 - **L'evento `.sessionMessagePartRemoved` richiede anche `messageID`**.
+- **NOMI EVENTI SSE REALI (Sessione 12)**: il server OpenCode emette `permission.asked`, `permission.replied`, `question.asked`, `question.replied`, `question.rejected`, `todo.updated` **SENZA prefisso `session.`** — il parser accetta ora entrambe le forme. L'helper `requestID(in:)` estrae requestID da payload piatto (`requestID`/`id`) o annidato (`request`/`permission`/`data`/`body`); eventi con requestID assente/vuoto → `.sessionUnknown` (niente card fantasma).
+- **CompatibleAPI** ora copre anche domande: `questionReply(server:reply:)` e `questionReject(server:sessionID:requestID:)` con dispatch v1 (APIClient.answerQuestion/declineQuestion) e v2 (OpenCodeAPIClientV2.questionReply/questionReject). MAI bypassare con apiV2 diretto da AppState.
 - **La build macOS avviene via SwiftPM** (`swift build`/`swift test`); il progetto Xcode è iOS-only.
-- Comandi verificati: `swift build`, `swift test` (79), `swift run MockServer --port N --scenario burst50|delta50|reconnect-test|error|degraded`, `swift run OpenCodeWidgets <detect|session-create|prompt|stream|revert|pty|health>`, build simulatore + device (comandi in README).
+- Comandi verificati: `swift build`, `swift test` (**81**), `swift run MockServer --port N --scenario burst50|delta50|reconnect-test|error|degraded|permission-question`, `swift run OpenCodeWidgets <detect|session-create|prompt|stream|revert|pty|health>`, build simulatore + device (comandi in README).
 - macOS 26.5: `URLSessionWebSocketTask.sendPing` non completa MAI il callback → NON usare ping/pong per waitForOpen (polling su task.response).
 - Progetto NON è un repo git → i pattern allow RELATIVI non matchano mai (`worktree="/"`): usare SEMPRE `**/.opencode/memory/...` (lezione 3, recidiva → fix applicato a session-scribe/error-analyst; **vale al riavvio di opencode** — in questa sessione il subagent era ancora bloccato dalla config vecchia).
 - Subagent "general" può dichiarare completed senza file (recidiva F1→F4): verificare SEMPRE ls+swift build e rilanciare su stessa task_id.
 
 ---
+
+## Sessione del 5 Ago 2026 — Sessione 12: fix bug critico permessi/domande (SSE senza prefisso `session.`)
+**Fatto:** risolto il bug prioritario utente (dock permessi/domande mai popolato). Fix: (1) `SessionEventStream.swift` — i case del parser accettano nomi con e senza prefisso `session.` per permission.*/question.* (+ `todo.updated`), nuovo helper `requestID(in:)` per payload piatti o annidati, eventi senza requestID scartati (.sessionUnknown); (2) `CompatibleAPI.swift` — nuovi `questionReply`/`questionReject` con dispatch v1/v2; (3) `AppState.swift` — answerQuestion/declineQuestion passano da compat, gestito il nuovo case `.questionRejected` (rimuove da pendingQuestions); (4) `Models.swift` — nuovo case SSEEvent `questionRejected(Question)`; (5) `APIClient.swift` — parser v1 gestisce "question.rejected"; (6) `SessionChatView.swift` — syncPermissionsAndQuestions con fallback: card minime se fetch dettagli vuoto ma snapshot ha pendingID, non sovrascrive card reali, refetch con budget 3 tentativi (flag permissionsAreFallback/questionsAreFallback + *FallbackAttempts); (7) `Tools/MockServer/main.swift` — nuovo scenario `permissionQuestion` ("permission-question") con nomi reali e payload completi, niente più `try!` (guard con fallback a session.status idle). Test E2E nuovi: `testSSERealEventNamesWithoutSessionPrefix`, `testSSEQuestionRejectedRemovesPending`. Verifica: build 0 errori/warning, 81/81 test, mock compila. Red team: zero [CRITICO]; note risolte (fallback sovrascriveva card reali → protetto; try! nel mock → rimosso; question.rejected v1 → aggiunto; requestID vuoto → scartato); 3 note accettate (card minime in attesa con budget 3 tentativi, refetch-per-snapshot caso parziale, mock riemette asked su reconnect).
+**Decisioni:** gli eventi SSE vanno gestiti per nome reale del server (senza prefisso) mantenendo retro-compatibilità con la forma `session.`; il percorso domande deve passare SEMPRE da CompatibleAPI (mai apiV2 diretto da AppState — su server v1 falliva); il fallback del dock non deve MAI sovrascrivere card reali già presenti.
+**Errori/lezioni:** vedere lessons.md se aggiunte (causa radice: parser SSE troppo rigido rispetto al wire reale — lezione: validare il parser contro il wire vero, non contro il mock).
 
 ## Sessione del 3 Ago 2026 — Sessione 11: verifica totale + fix core + audit sicurezza + fix UI delegati
 **Fatto:** audit funzionale e2e stress (101 check STABILE); audit UI ~200 incongruenze corrette; audit core 4 ALTA fixati (A1 reconnect SSE v1, A2 anti-doppioni per-chiamata + test, A3 onTermination subscribeSessions, A4 204 body vuoto + test) + AppIntents + foreground reconnect + dedup sessioni; audit sicurezza PULITE (0 try!/as!/fatalError, 0 segreti log); fix UI critici delegati a subagent (bottom nav padding, retry chat, collega ora finto, toggle spazzatura, selettore ragionamento, empty state v1, double sheet, accessibility labels); build 0 errori 0 warning, 79/79 test (2 nuovi), xcodebuild simulatore SUCCEEDED.

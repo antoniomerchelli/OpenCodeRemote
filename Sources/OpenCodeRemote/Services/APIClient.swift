@@ -798,26 +798,42 @@ public actor V1SSEClient: SSEClient {
                 
                 var currentEvent: String = ""
                 var currentData: String = ""
+                var buffer = Data()
                 
-                for try await line in bytes.lines {
+                // NOTA: NON usare `bytes.lines` — AsyncLineSequence scarta le
+                // righe vuote, che in SSE sono i separatori di evento (`\n\n`).
+                // Senza di esse gli eventi non vengono mai dispatchati. Si
+                // parsa byte-a-byte come fa SessionEventStream (v2).
+                for try await chunk in bytes {
                     if Task.isCancelled { break }
-                    
-                    if line.hasPrefix("event: ") {
-                        currentEvent = String(line.dropFirst(7))
-                    } else if line.hasPrefix("data: ") {
-                        currentData = String(line.dropFirst(6))
-                    } else if line.isEmpty {
-                        // Empty line means end of event
-                        if !currentEvent.isEmpty, !currentData.isEmpty {
-                            await self.handleSSEMessage(event: currentEvent, data: currentData)
+                    buffer.append(chunk)
+                    while let newline = buffer.firstIndex(of: 0x0A) {
+                        let lineData = buffer.subdata(in: buffer.startIndex..<newline)
+                        buffer.removeSubrange(buffer.startIndex...newline)
+                        var line = String(decoding: lineData, as: UTF8.self)
+                        if line.hasSuffix("\r") { line.removeLast() }
+                        
+                        if line.hasPrefix("event: ") {
+                            currentEvent = String(line.dropFirst(7))
+                        } else if line.hasPrefix("data: ") {
+                            currentData = String(line.dropFirst(6))
+                        } else if line.isEmpty {
+                            // Empty line means end of event
+                            if !currentEvent.isEmpty, !currentData.isEmpty {
+                                await self.handleSSEMessage(event: currentEvent, data: currentData)
+                            }
+                            currentEvent = ""
+                            currentData = ""
+                        } else if line.hasPrefix("id: ") {
+                            // ignore event ID for now
+                        } else if line.hasPrefix("retry: ") {
+                            // ignore retry for now
                         }
-                        currentEvent = ""
-                        currentData = ""
-                    } else if line.hasPrefix("id: ") {
-                        // ignore event ID for now
-                    } else if line.hasPrefix("retry: ") {
-                        // ignore retry for now
                     }
+                }
+                // Evento finale senza newline terminale.
+                if !currentEvent.isEmpty, !currentData.isEmpty {
+                    await self.handleSSEMessage(event: currentEvent, data: currentData)
                 }
             } catch {
                 if !Task.isCancelled {
@@ -920,6 +936,10 @@ public actor V1SSEClient: SSEClient {
         case "question.replied":
             if let question = try? decodeJSON(Question.self, from: dict) {
                 return .questionReplied(question)
+            }
+        case "question.rejected":
+            if let question = try? decodeJSON(Question.self, from: dict) {
+                return .questionRejected(question)
             }
         case "agent.invoked":
             if let agentId = dict["agentId"]?.stringValue,
