@@ -769,7 +769,10 @@ public struct ModelV2: Decodable, Equatable, Hashable, Sendable {
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
         capabilities = try container.decodeIfPresent(JSONValue.self, forKey: .capabilities)
-        cost = try container.decodeIfPresent(CostV2.self, forKey: .cost)
+        // Wire reale 1.18: `cost` è un ARRAY di voci (es. `[{input, output, cache}]`);
+        // il mock usa un singolo oggetto o un numero. Gestisce tutte le forme.
+        cost = (try? container.decodeIfPresent(CostV2.self, forKey: .cost))
+            ?? (try? container.decodeIfPresent([CostV2].self, forKey: .cost))?.first
         let dateString = (try? container.decodeIfPresent(String.self, forKey: .releaseDate))
             ?? (try? container.decodeIfPresent(String.self, forKey: .releaseDateCamel))
         releaseDate = dateString.flatMap { Self.isoFormatter.date(from: $0) }
