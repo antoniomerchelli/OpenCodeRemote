@@ -69,13 +69,14 @@ private struct V1ShellResponse: Decodable, Equatable, Hashable, Sendable {
 /// Body v1 di `POST /session/:id/command` (fallback quando la rotta v2 manca).
 /// Wire reale server 1.18: `{ messageID, agent, model: string|null, command,
 /// arguments: string|null }` — `arguments` è una STRINGA (il server rifiuta
-/// array con `Expected string`).
+/// array con `Expected string`) e la CHIAVE deve essere sempre presente
+/// (manca → 400 `Missing key at ["arguments"]`), quindi non è opzionale.
 private struct V1CommandBody: Encodable, Equatable, Hashable, Sendable {
     let messageID: String?
     let agent: String?
     let model: String?
     let command: String
-    let arguments: String?
+    let arguments: String
 }
 
 /// Risposta v1 di `POST /session/:id/command`: `{ info: Message, parts: [...] }`.
@@ -604,7 +605,7 @@ public actor OpenCodeAPIClientV2 {
                 agent: request.agent,
                 model: request.model?.modelID,
                 command: request.command,
-                arguments: request.arguments?.joined(separator: " ")
+                arguments: request.arguments?.joined(separator: " ") ?? ""
             )
             let response: V1CommandResponse? = try await performOptional("POST", path: "/session/\(id)/command", body: body, timeout: turnTimeout)
             guard let info = response?.info else { return nil }
