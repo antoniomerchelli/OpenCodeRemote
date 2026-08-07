@@ -162,12 +162,17 @@ extension ServerError {
         return ServerError(kind: .unknown, message: nsError.localizedDescription, underlyingDescription: nsError.localizedDescription)
     }
 
-    /// Interpreta il body di un errore API (`{ "error": "..." }` o
-    /// `{ "_tag": "SessionNotFoundError", ... }`).
+    /// Interpreta il body di un errore API (`{ "error": "..." }`,
+    /// `{ "message": "..." }` o il wire reale 1.18 `{ name, data: { message,
+    /// kind } }`).
     public static func fromResponse(statusCode: Int, body: Data) -> ServerError {
         if let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
             let tag = json["_tag"] as? String
-            let message = (json["error"] as? String) ?? (json["message"] as? String) ?? ""
+            let message = (json["error"] as? String)
+                ?? (json["message"] as? String)
+                // Wire reale 1.18: `{"name": "...", "data": {"message": "...", "kind": "..."}}`.
+                ?? (json["data"] as? [String: Any])?["message"] as? String
+                ?? ""
 
             switch tag {
             case "SessionNotFoundError":

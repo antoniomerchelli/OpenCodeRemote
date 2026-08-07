@@ -480,6 +480,12 @@ final class MockServer {
 
             switch (method, segments.count, action) {
             case ("GET", 3, nil):
+                // `/api/session/active` è una rotta SPECIFICA (lista sessioni
+                // attive), non una sessione chiamata "active": rispondere con
+                // array vuoto invece di una sessione finta.
+                if id == "active" {
+                    connection.respondJSON(status: 200, jsonArray: []); return
+                }
                 connection.respondJSON(status: 200, object: sessionV2JSON(id: id)); return
             case ("DELETE", 3, nil):
                 sessionOverrides.removeValue(forKey: id)

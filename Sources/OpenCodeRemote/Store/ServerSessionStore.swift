@@ -531,16 +531,32 @@ public actor ServerSessionStore {
 
     private func replaceMessages(_ incoming: [MessageV2]) {
         let incomingIDs = Set(incoming.map(\.id))
-        messages.removeAll { !incomingIDs.contains($0.id) && !optimisticIDs.contains($0.id) }
+        // Protegge i messaggi con streaming in corso: un replace (sync della
+        // view che riappare durante il turno) non deve far sparire i delta già
+        // accumulati. Un messaggio è "in streaming" se contiene almeno una
+        // part con stato `started` non ancora `ended`.
+        let streamingMessageIDs = Set(
+            messages.compactMap { message -> String? in
+                let parts = Self.partIDs(of: message)
+                guard parts.contains(where: { partStates[$0] == "started" }) else { return nil }
+                return message.id
+            }
+        )
+        messages.removeAll {
+            !incomingIDs.contains($0.id) && !optimisticIDs.contains($0.id) && !streamingMessageIDs.contains($0.id)
+        }
         upsertMessages(incoming)
         // Stato di streaming orfano: i delta di un turno precedente mai
         // conclusi (part mai arrivata nel messaggio) non vanno ri-mostrati
         // come streaming in sessioni successive della stessa sessione.
         let activePartIDs = Set(messages.flatMap(Self.partIDs(of:)))
-        partTexts = partTexts.filter { activePartIDs.contains($0.key) }
-        partStates = partStates.filter { activePartIDs.contains($0.key) }
-        partTextOrder = partTextOrder.filter { activePartIDs.contains($0) }
-        toolOutputs = toolOutputs.filter { activePartIDs.contains($0.key) }
+        // Le part con streaming attivo (stato `started`) vengono conservate
+        // anche se la loro part non è ancora nel messaggio dell'incoming.
+        let streamingPartIDs = Set(partStates.filter { $0.value == "started" }.keys)
+        partTexts = partTexts.filter { activePartIDs.contains($0.key) || streamingPartIDs.contains($0.key) }
+        partStates = partStates.filter { activePartIDs.contains($0.key) || streamingPartIDs.contains($0.key) }
+        partTextOrder = partTextOrder.filter { activePartIDs.contains($0) || streamingPartIDs.contains($0) }
+        toolOutputs = toolOutputs.filter { activePartIDs.contains($0.key) || streamingPartIDs.contains($0.key) }
     }
 
     private func upsertMessages(_ incoming: [MessageV2]) {

@@ -445,7 +445,9 @@ struct FileDetailView: View {
             let matches = pattern.matches(in: line, range: NSRange(line.startIndex..., in: line))
             for match in matches {
                 if let range = Range(match.range, in: line) {
-                    attrs[Range(range, in: attrs)!].foregroundColor = .green
+                    if let attrsRange = Range(range, in: attrs) {
+                        attrs[attrsRange].foregroundColor = .green
+                    }
                 }
             }
         }

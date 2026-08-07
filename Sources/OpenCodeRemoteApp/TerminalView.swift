@@ -61,7 +61,9 @@ enum ANSIParser {
                 ))
             }
 
-            let codeRange = Range(match.range(at: 1), in: text)!
+            // `range(at: 1)` può fallire su testo non-ASCII/emoji (NSRange vs
+            // Range non collimano): meglio saltare il match che crashare.
+            guard let codeRange = Range(match.range(at: 1), in: text) else { continue }
             let codes = text[codeRange].split(separator: ";").compactMap { Int($0) }
 
             var i = 0

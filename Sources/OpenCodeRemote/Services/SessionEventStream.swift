@@ -1075,8 +1075,10 @@ public actor SessionEventStream {
     }
 
     /// Backoff esponenziale `base * 2^(try-1)` cap a `streamReconnectMaxBackoffMS`.
+    /// Floor di 250ms: se il server emette `retry: 0`, senza floor il client
+    /// entrerebbe in un loop di riconnessione a raffica.
     private func nextReconnectDelayMS(try attempt: Int, retryHint: Int?) -> Int {
-        let base = min(retryHint ?? CoreConstants.streamReconnectDelayMS, CoreConstants.streamReconnectMaxBackoffMS)
+        let base = max(min(retryHint ?? CoreConstants.streamReconnectDelayMS, CoreConstants.streamReconnectMaxBackoffMS), 250)
         let exponent = min(max(attempt - 1, 0), 16)
         let shifted = base << exponent
         return min(shifted, CoreConstants.streamReconnectMaxBackoffMS)

@@ -99,6 +99,11 @@ public final class AppState: Sendable {
     
     /// Server attivo del percorso v2 (impostato da `connectV2(to:)`).
     private var v2ConnectedServer: ServerConnection?
+    /// Generazione di connessione v2: incrementata da ogni `disconnectV2()`.
+    /// `connectV2` cattura il valore all'inizio e lo riverifica dopo ogni
+    /// `await`: se un disconnect è avvenuto nel frattempo, il bootstrap in
+    /// volo viene abbandonato e `v2ConnectedServer` non viene (ri)impostato.
+    private var connectionGeneration = 0
     /// True mentre `connect(to:)` è in corso (evita doppie connessioni).
     private var isConnecting = false
     /// Modelli v2 resi noti dal server per la risoluzione delle varianti.
@@ -352,16 +357,21 @@ public final class AppState: Sendable {
     /// Connette il percorso v2: rileva il protocollo, configura i client v2,
     /// avvia l'health monitor e programma il bootstrap delle directory.
     public func connectV2(to server: ServerConnection) async throws {
+        let generation = connectionGeneration
         _ = try await protocolDetector.detect(server: server)
+        // Un disconnect può essere avvenuto durante il detect: non proseguire.
+        guard connectionGeneration == generation else { throw CancellationError() }
         await apiV2.setServer(server)
         await storePool.api.setServer(server)
         await healthMonitor.start(server: server)
+        guard connectionGeneration == generation else { throw CancellationError() }
         v2ConnectedServer = server
         
         // Bootstrap best-effort: se il server non espone la lista sessioni o
         // le directory falliscono, la connessione v2 resta comunque attiva
         // (la chat v2 usa solo store per-sessione e stream SSE).
         if let list = try? await compat.listSessions(server: server, limit: CoreConstants.initialMessagePageSize) {
+            guard connectionGeneration == generation else { return }
             let directories = Set(list.sessions.compactMap(\.location).filter { !$0.isEmpty })
             for directory in directories {
                 await directoryManager.ensureChild(directory: directory)
@@ -398,6 +408,7 @@ public final class AppState: Sendable {
     /// Stacca il percorso v2: ferma l'health monitor, gli stream SSE per-sessione
     /// e azzera lo stato v2.
     public func disconnectV2() {
+        connectionGeneration += 1
         v2ConnectedServer = nil
         for (_, task) in sessionStreams {
             task.cancel()
@@ -537,6 +548,11 @@ public final class AppState: Sendable {
             // Traccia il task per-sessione: `disconnectV2()` lo cancella così
             // lo stream SSE non continua a riconnettersi verso un server spento
             // quando l'utente disconnette con la chat ancora aperta.
+            // Se esiste già uno stream per la stessa sessione (doppia
+            // sottoscrizione), cancellarlo PRIMA di sostituirlo: senza questo
+            // il vecchio task vivo continua a connettersi e il suo store non
+            // viene mai rilasciato (leak).
+            sessionStreams[sessionID]?.cancel()
             sessionStreams[sessionID] = task
             continuation.onTermination = { _ in
                 task.cancel()

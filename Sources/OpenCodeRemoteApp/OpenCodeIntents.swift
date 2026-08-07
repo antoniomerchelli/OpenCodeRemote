@@ -21,8 +21,14 @@ public final class IntentService: Sendable {
         guard let session = appState.currentSession else {
             throw IntentServiceError.noActiveSession
         }
-        let request = SendMessageAsyncRequest(message: prompt)
-        try await appState.apiClient.sendMessageAsync(session.id, request: request)
+        guard let server = appState.currentServer else {
+            throw IntentServiceError.notConfigured
+        }
+        // Percorso prompt corretto (dispatch v1/v2 con `id` msg_ richiesto dal
+        // wire v2); il vecchio sendMessageAsync inviava {prompt:{text}} senza
+        // id/agent → 400 su v2, 404 su v1 (intent rotto).
+        let request = SessionPromptV2(id: "msg_\(UUID().uuidString)", prompt: prompt)
+        _ = try await appState.compat.prompt(server: server, sessionID: session.id, request: request)
     }
 
     public func checkPendingPermissions() -> Int {

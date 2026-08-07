@@ -580,7 +580,9 @@ public actor OpenCodeAPIClientV2 {
         } catch is HTMLFallbackError {
             let body = V1ShellBody(
                 command: request.command,
-                agent: request.agent,
+                // Il server 1.18 richiede `agent` (400 `Missing key ["agent"]`):
+                // default `build` come nel client v1 (APIClient.executeShell).
+                agent: request.agent ?? "build",
                 model: request.model
             )
             let response: V1ShellResponse? = try await performOptional("POST", path: "/session/\(id)/shell", body: body, timeout: turnTimeout)

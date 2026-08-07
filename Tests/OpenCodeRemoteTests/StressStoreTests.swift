@@ -108,6 +108,11 @@ final class StressStoreTests: XCTestCase {
 
         for index in 0..<100 {
             _ = await pool.createSessionStore(sessionID: "s-\(index)")
+            // Timestamp di creazione distinti: l'eviction LRU ordina per
+            // `Date()` e con tick coincidenti il sort (non stabile) evicta
+            // arbitrariamente → test flaky. 1ms di pausa basta (Date() ha
+            // risoluzione µs su macOS).
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
         // Rilascia tutto tranne s-99 (refCount > 0 → protetta).
         for index in 0..<99 {
@@ -430,6 +435,9 @@ final class StressStoreTests: XCTestCase {
 
         for i in 0..<200 {
             let store = await pool.createSessionStore(sessionID: "lc-\(i)")
+            // Stessa ragione del test eviction: timestamp di creazione distinti
+            // per un'eviction LRU deterministica (sort non stabile).
+            try? await Task.sleep(nanoseconds: 1_000_000)
             await store.apply(.sessionTextDelta(partID: "p-\(i)", text: "x"))
             await store.apply(.sessionStatus(.idle))
             await pool.release(sessionID: "lc-\(i)")

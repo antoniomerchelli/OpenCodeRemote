@@ -682,7 +682,14 @@ public actor V1OpenCodeAPIClient: OpenCodeAPIClient {
             command: request.command,
             // Il server 1.18 richiede `agent` (default: agente build).
             agent: request.agentId?.rawValue ?? "build",
-            model: request.modelId.map { ModelRefV2(providerID: $0.rawValue, modelID: $0.rawValue) }
+            // `providerID` NON è il modelID: derivarlo dalla parte prima dello
+            // slash (es. "anthropic/claude-sonnet" → provider "anthropic"),
+            // fallback al modelID per i modelli senza provider qualificato.
+            model: request.modelId.map { modelID in
+                let parts = modelID.rawValue.split(separator: "/", maxSplits: 1)
+                let providerID = parts.count == 2 ? String(parts[0]) : modelID.rawValue
+                return ModelRefV2(providerID: providerID, modelID: modelID.rawValue)
+            }
         )
         let data = try encoder.encode(body)
         let req = authenticatedRequest("POST", try url(for: "/session/\(sessionId.rawValue)/shell", server: server), server: server, body: data)
