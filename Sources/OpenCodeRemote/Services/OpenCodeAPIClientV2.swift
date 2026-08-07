@@ -17,6 +17,40 @@ public struct HistoryPageV2: Decodable, Equatable, Hashable, Sendable {
     }
 }
 
+/// Errore interno del client: il server ha risposto 2xx con body HTML
+/// (pagina SPA di fallback): la rotta v2 richiesta non esiste sul server.
+private enum HTMLFallbackError: Error {
+    case htmlResponse(statusCode: Int)
+}
+
+// MARK: - Body/risposte v1 per il fallback (F1)
+
+/// Body v1 di `POST /session/:id/shell` (fallback quando la rotta v2 manca).
+private struct V1ShellBody: Encodable, Equatable, Hashable, Sendable {
+    let command: String
+    let agentId: String?
+    let modelId: String?
+}
+
+/// Risposta v1 di `POST /session/:id/shell`.
+private struct V1ShellResponse: Decodable, Equatable, Hashable, Sendable {
+    let output: String
+}
+
+/// Body v1 di `POST /session/:id/command` (fallback quando la rotta v2 manca).
+private struct V1CommandBody: Encodable, Equatable, Hashable, Sendable {
+    let messageID: String?
+    let agent: String?
+    let model: String?
+    let command: String
+    let arguments: [String]?
+}
+
+/// Risposta v1 di `POST /session/:id/command`: `{ info: Message }`.
+private struct V1CommandResponse: Decodable, Equatable, Hashable, Sendable {
+    let info: Message?
+}
+
 // MARK: - OpenCodeAPIClientV2
 
 /// Client REST per la API v2 di OpenCode (`/api/...`).
@@ -65,6 +99,16 @@ public actor OpenCodeAPIClientV2 {
     /// Timeout di default per le chiamate che attendono il completamento di un
     /// turno (prompt/wait/compact/summarize/shell/command): `apiTurnTimeoutMS`.
     private static let turnTimeout: TimeInterval = TimeInterval(CoreConstants.apiTurnTimeoutMS) / 1_000
+
+    /// Rileva il body HTML della SPA di fallback (rotta v2 inesistente).
+    /// Controlla i primi 512 byte: trim + lowercased, deve iniziare con
+    /// `<!doctype html` oppure `<html`.
+    private static func isHTMLBody(_ data: Data) -> Bool {
+        let prefix = data.prefix(512)
+        guard let text = String(data: prefix, encoding: .utf8) else { return false }
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.hasPrefix("<!doctype html") || normalized.hasPrefix("<html")
+    }
 
     private func requireServer() throws -> ServerConnection {
         guard let server = currentServer else {
@@ -166,8 +210,13 @@ public actor OpenCodeAPIClientV2 {
             guard (200...299).contains(http.statusCode) else {
                 throw ServerError.fromResponse(statusCode: http.statusCode, body: data)
             }
+            if Self.isHTMLBody(data) {
+                throw HTMLFallbackError.htmlResponse(statusCode: http.statusCode)
+            }
             guard !data.isEmpty else { return nil }
             return try decoder.decode(T.self, from: data)
+        } catch let error as HTMLFallbackError {
+            throw error
         } catch let error as ServerError {
             throw error
         } catch {
@@ -193,9 +242,14 @@ public actor OpenCodeAPIClientV2 {
             guard (200...299).contains(http.statusCode) else {
                 throw ServerError.fromResponse(statusCode: http.statusCode, body: data)
             }
+            if Self.isHTMLBody(data) {
+                throw HTMLFallbackError.htmlResponse(statusCode: http.statusCode)
+            }
             // 204/body vuoto: nessuna decodifica necessaria.
             if data.isEmpty { return }
             _ = try decoder.decode(EmptyV2Response.self, from: data)
+        } catch let error as HTMLFallbackError {
+            throw error
         } catch let error as ServerError {
             throw error
         } catch {
@@ -433,18 +487,64 @@ public actor OpenCodeAPIClientV2 {
     }
 
     /// `DELETE /api/session/:id` — rimuove la sessione.
+    /// Fallback v1 `DELETE /session/:id` se il server risponde con la SPA HTML.
     public func remove(id: String) async throws {
-        try await performNoContent("DELETE", path: "/api/session/\(id)")
+        do {
+            try await performNoContent("DELETE", path: "/api/session/\(id)")
+        } catch is HTMLFallbackError {
+            try await performNoContent("DELETE", path: "/session/\(id)")
+        }
     }
 
     /// `POST /api/session/:id/shell` — esegue un comando shell.
+    /// Fallback v1 `POST /session/:id/shell` (da cui si ricostruisce un
+    /// `MessageV2DTO` con `raw["output"]`, leggibile da `ShellCommandRunner`).
     public func shell(id: String, request: SessionShellV2, timeout: TimeInterval? = nil) async throws -> MessageV2DTO? {
-        try await performOptional("POST", path: "/api/session/\(id)/shell", body: request, timeout: timeout ?? Self.turnTimeout)
+        let turnTimeout = timeout ?? Self.turnTimeout
+        do {
+            return try await performOptional("POST", path: "/api/session/\(id)/shell", body: request, timeout: turnTimeout)
+        } catch is HTMLFallbackError {
+            let body = V1ShellBody(
+                command: request.command,
+                agentId: request.agent,
+                modelId: request.model?.modelID
+            )
+            let response: V1ShellResponse? = try await performOptional("POST", path: "/session/\(id)/shell", body: body, timeout: turnTimeout)
+            guard let response else { return nil }
+            return MessageV2DTO(id: "shell-\(UUID().uuidString)", raw: ["output": .string(response.output)])
+        }
     }
 
     /// `POST /api/session/:id/command` — esegue un comando custom `/nome`.
+    /// Fallback v1 `POST /session/:id/command` (risposta `{ info: Message }`,
+    /// mappata a dominio e ri-encoded in `MessageV2DTO`).
     public func command(id: String, request: SessionCommandV2, timeout: TimeInterval? = nil) async throws -> MessageV2DTO? {
-        try await performOptional("POST", path: "/api/session/\(id)/command", body: request, timeout: timeout ?? Self.turnTimeout)
+        let turnTimeout = timeout ?? Self.turnTimeout
+        do {
+            return try await performOptional("POST", path: "/api/session/\(id)/command", body: request, timeout: turnTimeout)
+        } catch is HTMLFallbackError {
+            let body = V1CommandBody(
+                messageID: request.id,
+                agent: request.agent,
+                model: request.model?.modelID,
+                command: request.command,
+                arguments: request.arguments
+            )
+            let response: V1CommandResponse? = try await performOptional("POST", path: "/session/\(id)/command", body: body, timeout: turnTimeout)
+            guard let info = response?.info,
+                  let mapped = SessionMessageMapperV2.mapV1ToV2(info) else {
+                return nil
+            }
+            // Round-trip message → DTO passando da JSONValue, con il
+            // parsing leniente di `messageDTO(from:)` (il decode rigoroso di
+            // `MessageV2DTO` fallisce sul `time` numerico di `MessageV2`).
+            guard let data = try? JSONEncoder().encode(mapped),
+                  let jsonObject = try? JSONSerialization.jsonObject(with: data),
+                  let dict = jsonObject as? [String: Any] else {
+                return nil
+            }
+            return messageDTO(from: JSONValue.from(dict))
+        }
     }
 
     /// `POST /api/session/:id/fork` — fork della sessione.
