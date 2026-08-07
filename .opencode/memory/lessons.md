@@ -1,5 +1,20 @@
 # OpenCode Remote — Lezioni apprese
 
+## Sessione 17 (7 Ago 2026) — Test live server reale 1.18.15 + wire reale shell/command
+
+1. **`opencode serve` ascolta di default su `127.0.0.1`**: l'iPhone non può raggiungerlo. Serve `--hostname 0.0.0.0` (o `--mdns`). Verificare con `lsof -nP -iTCP:4096 -sTCP:LISTEN` (deve mostrare `*:4096`).
+2. **Il firewall macOS ("Limit incoming connections") blocca le connessioni IN INGRESSO ai binari CLI** anche se il server ascolta su `0.0.0.0`: curl dallo stesso Mac verso l'IP LAN funziona (passa comunque) ma l'iPhone non si connette ("come se non trovasse il server"). → `sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add <path-binario>` + `--unblockapp <path>`. Verifica con `--listapps` (NON `system_profiler`: ha cache non aggiornata).
+3. **iPhone collegato via USB = interfaccia link-local 169.254.x.x**: il Mac è raggiungibile SOLO all'IP della sua interfaccia USB (es. `169.254.31.57`), non all'IP WiFi. Verificare con `arp -a` (il device appare su `en19` con 169.254.x.x) e `ipconfig getifaddr en19`. L'URL dell'app deve usare quell'IP.
+4. **Wire REALE server 1.18 per il fallback v1** (scoperto per tentativi, le validazioni rivelano lo schema):
+   - `POST /session/:id/shell`: body `{command, agent, model:{providerID,modelID}}` — NON `agentId`/`modelId` (400 `Missing key ["agent"]`); risposta `{info: Message, parts:[tool bash completed, state.output]}` — NON `{output}`.
+   - `POST /session/:id/command`: `arguments` è STRINGA (array → 400 `Expected string`), `model` è stringa|null (oggetto → 400).
+   - `POST /api/session/:id/prompt`: `prompt` è OGGETTO `{text}` (stringa → 400 `Expected PromptInput`).
+   - `agent` nel body deve essere l'**agente REALE della sessione** (`orchestrator`, `code-reviewer`, `build`, …): `agent: "opencode"` → 500 (agente inesistente). Lista: `GET /api/agent`.
+5. **`POST /session/:id/command` v1 è BUGGATO su 1.18.15**: 500 su OGNI payload (5 varianti testate: text/bash/echo, arguments []/stringa, model stringa/oggetto). Errore interno `SessionPrompt.command` (stack nel log: `~/.local/share/opencode/log/opencode.log` col `ref` dell'errore). Non fixabile dal client.
+6. **`opencode serve` NON logga le richieste HTTP** (`disableLogger:!0` nel bundle): per debug del wire usare curl diretto + grep dei `ref=err_*` in `~/.local/share/opencode/log/opencode.log` (i ref degli errori 500).
+7. **Reinstall dell'app iOS (uninstall+install via devicectl) richiede di nuovo la TRUST del profilo**: launch → `Unable to launch … profile has not been explicitly trusted`. → Impostazioni → Generali → Gestione VPN e dispositivi → "Fidati".
+8. **`devicectl device` non ha né screenshot né log stream per device reali** (solo `--console` che resta attaccato allo stdout): la verifica del comportamento dell'app si fa lato server (connessioni `lsof`, log con `ref`) o visivamente.
+
 ## Sessione 16 (7 Ago 2026) — F1-F3: fallback v1, merge cronologia, mock /project (piano "risoluzione problemi")
 
 1. **`catch HTMLFallbackError` (senza pattern) NON compila per enum con associated value**: per un enum `case htmlResponse(statusCode: Int)` il pattern match richiede `catch let error as HTMLFallbackError` (o `catch is HTMLFallbackError` se la variabile non serve). Scritto anche nel prompt agente, l'agente F1 lo ha riprodotto → verificare sempre con `swift build` dopo la delega.

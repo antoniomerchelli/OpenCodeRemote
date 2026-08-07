@@ -1,53 +1,40 @@
-# Session Summary — F1-F3 piano "risoluzione problemi": fallback v1, merge cronologia, mock + Red Team + build iPhone
+# Session Summary — OpenCode Remote
 
-## Obiettivo
-Eseguire il piano `implementation plan risoluzione problemi.md` (fasi F0-F6) con più agenti: compatibilità app OpenCodeRemote iOS contro server opencode 1.18 (rotte v2 mancanti → HTML fallback, cronologia v1 legacy, mock allineato).
+## Stato attuale
+Progetto in ottimo stato: piano "risoluzione problemi" (F1-F3 fallback v1, merge cronologia, mock) **completato e verificato** — **175/175 test verdi**, build iOS device OK, app installata su iPhone 14 Pro. Nella sessione 17 il server reale opencode **1.18.15 è stato riavviato** e il wire dei fallback shell/command è stato **allineato al wire reale** (scoperti 3 disallineamenti: body shell `agent`/`model` oggetto, risposta shell `{info,parts}`, `arguments` command stringa). **Il collegamento dall'app all'iPhone non è ancora stato completato**: serviva la trust del profilo di sviluppo dopo la reinstall. Restano **10 commit locali non pushati** su `origin/main`.
 
-## Fatto
-- **F0 backup**: WIP sessione 15 committato su branch `backup/session-15-wip` (`dfba7ed`, 17 file); `main` riportato pulito.
-- **F1 (agente) — Fallback v1 nel client v2**: `OpenCodeAPIClientV2.remove/shell/command` ora rilevano risposta 2xx con body HTML (`isHTMLBody` + `HTMLFallbackError`) e ritentano la rotta v1:
-  - `DELETE /session/:id` (remove)
-  - `POST /session/:id/shell` (body command/agentId/modelId → `{output}` → `MessageV2DTO` con `raw["output"]`)
-  - `POST /session/:id/command` (body messageID/agent/model/command/arguments → `{info: Message}` → `mapV1ToV2` → `messageDTO`)
-- **F2 (agente) — Merge cronologia**: `ServerSessionStore` accetta `v1Api: V1OpenCodeAPIClient?` (init default nil, passato via `SessionStorePool(v1Api:)` da AppState); su `before == nil` `fetchPage` (ora instance method) integra `GET /session/:id/message` con la pagina v2: parsing leniente dominio→DTO, dedup per id con precedenza v2, best-effort (errore v1 non fa fallire sync). `fetchPage` combina il doppio fallback wire reale `messageList` (`/api/session/:id/message`, `cursor.prev`) → `historyPage` (`/history`).
-- **F3 (agente) — Mock**: rotte `GET /project` (2 progetti, wire v1: path/lastAccessed ISO8601/vcsStatus completo) e `GET /session/status` (`{id: SessionStatus}` con valori validi, es. `executingTool`).
-- **Fix post-agenti (verifica orchestrator)**: 4 test rossi → 2 bug reali F2 (round-trip `MessageV2DTO` su `time` numerico → parsing leniente `JSONValue`; ordinamento legacy per `time` in secondi) + 1 bug test F1 (mock leggeva `httpBody` nil → helper `readBodyStream` da `httpBodyStream`) + warning `catch let error as` (enum con associated value) → `catch is` dove la variabile non serve.
-- **F4 Red Team (`code-reviewer`)**: 2 [CRITICO] confermati con evidenza sul sorgente + 1 [ATTENZIONE]:
-  - C1: `time` legacy moltiplicato `* 1000` → anno ~57.000 → rimosso il moltiplicatore (dominio già in secondi).
-  - C2: `MessageV2.encode` per `.user` scrive `text` top-level → `content: obj["content"] ?? obj["text"]`.
-  - A4: mock `"working"` non è `SessionStatus` valido → `executingTool`.
-  - Regression test aggiunti: `testSyncLegacyTimeIsSecondsNotMilliseconds`, `testSyncPreservesLegacyUserText`.
-- **Merge WIP**: `git merge backup/session-15-wip` → 3 conflitti risolti (performOptional `decodeLenient` + catch HTML; `fetchPage` di istanza con doppio fallback; sync). Commit merge `0beb4d7`.
-- **Test**: **175/175 VERDI** (162 baseline + 13 nuovi F1-F3) in 4.4s.
-- **F5 build/install**: `xcodebuild` iOS device **BUILD SUCCEEDED** (firma `3J5D3W56UZ`, profile `io.opencode.remote`); app installata e lanciata su iPhone 14 Pro via `devicectl`. **Test LIVE bloccato**: server opencode `192.168.1.133:4096` OFFLINE (probe falliti). Verifica mock manuale OK (`/project`, `/session/status` con curl).
-- **Commit atomici**: `026f82c` feat(api-v2) fallback v1 · `dfc455b` feat(store) merge cronologia · `bd02f3b` feat(mock) rotte · `0beb4d7` merge WIP.
+## Prossimi passi consigliati
+1. **Test collegamento app → server**: dopo la trust del profilo su iPhone (Impostazioni → Generali → Gestione VPN e dispositivi → "Fidati"), lanciare l'app e collegarla a **`http://169.254.31.57:4096`** (IP del Mac sull'interfaccia USB en19 — l'iPhone è collegato via cavo, NON è sulla WiFi; l'IP WiFi 192.168.1.133 NON è raggiungibile dal telefono). Server già attivo (PID 10393, `opencode serve --port 4096 --hostname 0.0.0.0`, firewall macOS sbloccato per opencode).
+2. **Verificare dal vivo**: lista sessioni, apertura sessione vecchia (merge cronologia v1+v2), invio messaggio (prompt v2 = `{prompt:{text}}` verificato 200), cancellazione sessione (fallback v1 remove → `true`).
+3. **Push**: 10 commit locali (fino a `dacba18`) attendono conferma push su `origin/main`; poi eliminare branch `backup/session-15-wip` (WIP già mergiato).
+4. **Nota command v1**: `POST /session/:id/command` è BUGGATO sul server 1.18.15 (500 su ogni payload) — documentare/aggirare se servirà (slash-command UI non ancora cablata comunque).
+5. Aggiornare `HANDOFF_NEXT_AI.md` con gli esiti del test live.
 
-## Decisioni
-- Backup del WIP su branch dedicato (non stash): albero `main` pulito durante l'esecuzione del piano, WIP mai perso.
-- `fetchPage` instance method con doppio fallback `messageList` → `historyPage` (wire reale + mock), merge v1 solo su prima pagina.
-- Il fallback F1 usa il parsing leniente `messageDTO(from:)` (il decode rigoroso fallisce su `time` numerico del dominio).
-- `V1ShellResponse.output` è `String` non-optional (fallback shell sempre con output, anche vuoto).
+## Problemi aperti / blocchi
+- **Launch app bloccato da trust profilo** dopo uninstall+reinstall (security error) → azione utente su iPhone.
+- **iPhone non sulla rete WiFi**: il collegamento funziona SOLO via USB con IP 169.254.31.57 (link-local, può cambiare al riconnettimento).
+- **`POST /session/:id/command` v1 → 500 sempre** su server 1.18.15 (bug server, non fixabile dal client; il body è comunque allineato al wire).
+- Push non effettuato (attende conferma utente).
 
-## Errori / Lezioni (dettagli in lessons.md)
-1. `catch HTMLFallbackError` senza pattern non compila per enum con associated value.
-2. `URLSession` converte `httpBody` in `httpBodyStream` → i mock URLProtocol devono leggere lo stream.
-3. Round-trip Codable dominio→DTO fallisce su `time` con tipi divergenti (numero vs oggetto) → parsing leniente.
-4. `MessageV2.encode` asimmetrico: `.user` scrive `text` top-level, `.assistant` sotto `content`.
-5. `MessageV2.time` è in SECONDI (TimeInterval) → niente `* 1000` per `PartTimeV2.created`.
-6. `SessionStatus` v1 non include `"working"` → usare `executingTool` nei fixture.
+## Note d'ambiente
+- **Server**: `nohup opencode serve --port 4096 --hostname 0.0.0.0 > /tmp/opencode-server.log 2>&1 &` — il server NON logga le richieste HTTP; errori 500: grep `ref=err_*` in `~/.local/share/opencode/log/opencode.log`.
+- **Firewall macOS**: opencode è nella lista consentiti (`sudo socketfilterfw --add/--unblockapp /Users/leociaramelli/.opencode/bin/opencode`); verifica con `--listapps`.
+- **Device**: iPhone 14 Pro `91B0FEB3-3149-5B40-AC64-06F86C63E030` (iPhone di Leo); bundle `io.opencode.remote`; build: `xcodebuild -project OpenCodeRemote.xcodeproj -scheme OpenCodeRemoteApp -destination 'generic/platform=iOS' -configuration Debug DEVELOPMENT_TEAM=3J5D3W56UZ build`; app in `DerivedData/OpenCodeRemote-akermwnygjigjgflrfvvlifxlasy/Build/Products/Debug-iphoneos/`.
+- **Agenti reali del server** (per body v1): `GET /api/agent` → orchestrator, code-reviewer, build, plan, general, explore, etc. `agent: "opencode"` → 500.
+- **Wire verificato**: prompt v2 `{prompt:{text}, agent, model:{providerID,modelID}}`; shell v1 `{command, agent, model:{...}}` → `{info:{id,parts:[tool state.output]}}`; command v1 `{messageID, agent, model:string|null, command, arguments:string}`; message v1 `[{info,parts}]`; DELETE v1 → `true`.
 
-## Prossimi passi
-1. **Test LIVE** quando il server opencode torna online: verificare remove/shell/command su server reale (il formato v1 di command `{info: Message}` è da confermare — rischio residuo A3 del reviewer: parti top-level vs `{info, parts}`).
-2. **Cablaggio UI**: `ShellCommandRunner` non è istanziato in `AppState` (fallback F1 non ancora raggiungibile in produzione) — verificare se previsto in fase successiva del piano.
-3. Push di `main` (5 commit locali: 2 vecchi `f6300a1`+`2dcbe0d` + 3 F1-F3 + 1 merge) a `origin` — NON fatto, in attesa di conferma utente.
-4. Sessione successiva: rileggere `HANDOFF_NEXT_AI.md` (aggiornare se ancora rilevante).
-5. Pulizia: branch `backup/session-15-wip` può essere eliminato DOPO conferma utente (il WIP è nel merge su main).
+---
 
-## File modificati (sessione 16)
-- `Sources/OpenCodeRemote/Services/OpenCodeAPIClientV2.swift` — fallback v1 remove/shell/command + `isHTMLBody`/`HTMLFallbackError` + struct V1*
-- `Sources/OpenCodeRemote/Store/ServerSessionStore.swift` — `v1Api`, `fetchPage` instance con doppio fallback + merge v1, parsing leniente legacy
-- `Sources/OpenCodeRemote/Store/SessionStorePool.swift` — `v1Api` pass-through
-- `Sources/OpenCodeRemote/Services/AppState.swift` — `SessionStorePool(v1Api: client)`
-- `Tools/MockServer/main.swift` — rotte `/project`, `/session/status`
-- Test nuovi: `OpenCodeAPIClientV2FallbackTests.swift` (5), `CronologyMergeTests.swift` (6), `MockServerRoutesTests.swift` (2)
-- `.opencode/memory/lessons.md`, `.opencode/memory/session-summary.md` — aggiornati
+## Sessione del 7 Ago 2026 (sessione 17) — Test live server reale + allineamento wire
+**Fatto:**
+- Riavviato il server reale: `opencode serve --port 4096` (default `127.0.0.1` → NON raggiungibile dal telefono) → riavviato con `--hostname 0.0.0.0` (ascolto `*:4096`).
+- Verifica wire reale 1.18.15 via curl su ogni rotta usata dall'app: sessioni OK; `/project` OK (2 progetti, formato `[{id,worktree,vcs,...}]`); `/session/status` reale → `{}` (il mock risponde `{id: SessionStatus}` — differenza da notare); v2 message vuota + v1 message `[{info,parts}]` → merge F2 confermato; DELETE v2 → HTML + DELETE v1 → `true` → fallback remove OK; **prompt v2 → 200** con `{prompt:{text}}` (wire già corretto in app, il mio primo curl con stringa era sbagliato); shell v1 → 200 con agent reale + model oggetto; command v1 → **500 su 5 payload diversi** (bug server).
+- **Fix wire (commit `dacba18`)**: `V1ShellBody` `agentId/modelId` → `agent` + `model: ModelRefV2`; `V1ShellResponse` `{output}` → `{info:{id, parts[].state.output}}` con estrazione output dal part tool; `V1CommandBody.arguments` `[String]` → `String` (joined). Test F1 aggiornati al wire reale (verifica body + output tool). **175/175 verdi**.
+- Build iOS + install su iPhone; **problemi connessione risolti**: (1) firewall macOS bloccava il binario → utente ha aggiunto opencode ai consentiti (sudo `socketfilterfw`); (2) iPhone collegato via USB (en19, 169.254.x.x) → IP Mac corretto `169.254.31.57`; (3) UI app bloccata da troppi tentativi falliti → **uninstall+reinstall** (dati azzerati); (4) launch → **trust profilo richiesta** (azione utente pendente).
+**Decisioni prese:** allineare il client al wire reale del server (anche se il mock era "più pulito") perché il fallback F1 deve funzionare contro il server 1.18; `arguments` command come stringa joined (il web li unisce in una stringa); output shell estratto dal part `tool` e messo in `raw["output"]` (il runner non legge i tool parts).
+**Errori/lezioni:** 8 lezioni nuove in `lessons.md` (sessione 17) + 2 lezioni globali (firewall macOS `socketfilterfw`, iPhone USB link-local) in `global-lessons.md`.
+
+## Sessione del 7 Ago 2026 (sessione 16) — Piano "risoluzione problemi" F0-F6 (fallback v1, merge cronologia, mock, Red Team)
+**Fatto (condensato):** F0 backup WIP su `backup/session-15-wip`; F1 fallback v1 (remove/shell/command) con rilevamento HTML (5 test); F2 merge cronologia v1 nella prima pagina di sync (6 test); F3 mock `/project` + `/session/status` (2 test); fix post-agenti (round-trip leniente, `httpBodyStream`, `catch is`); Red Team: 2 CRITICO (time in secondi, testo user top-level) + 1 ATTENZIONE fixati con regression test; merge WIP (3 conflitti); **175/175 verdi**; build iOS device OK + install/launch iPhone; tag `v1.4.0-compat-server118`; commit `026f82c`, `dfc455b`, `bd02f3b`, `0beb4d7`, `09482e1`.
+**Decisioni:** backup su branch (non stash); fetchPage instance con doppio fallback `messageList`→`historyPage`; parsing leniente `messageDTO(from:)` per il round-trip.
+**Errori/lezioni:** 7 lezioni in `lessons.md` (sessione 16).
