@@ -54,6 +54,16 @@ let package = Package(
             name: "MockServer",
             path: "Tools/MockServer"
         ),
+        .executableTarget(
+            name: "LiveE2E",
+            dependencies: [
+                "OpenCodeRemote",
+            ],
+            path: "Tools/LiveE2E",
+            swiftSettings: [
+                .unsafeFlags(["-Xfrontend", "-enable-actor-data-race-checks"]),
+            ]
+        ),
         .testTarget(
             name: "OpenCodeRemoteTests",
             dependencies: [.target(name: "OpenCodeRemote")],

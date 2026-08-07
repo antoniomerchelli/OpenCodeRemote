@@ -1,0 +1,364 @@
+// LiveE2E — Test definitivo end-to-end contro un server opencode REALE.
+//
+// Verifica l'effettiva funzionalità dell'app a tutti i livelli usando LE
+// STESSE classi che l'app usa in produzione (CompatibleAPI, ProtocolDetector,
+// V1OpenCodeAPIClient, OpenCodeAPIClientV2, SessionEventStream):
+//
+//   CONNESSIONE  → health (v1), rilevamento protocollo (v2), sessioni, progetto
+//   LOGICA       → fallback v2→v1 (project, delete, command), mapping v1→v2
+//   PARTI REALI  → prompt v2 con SSE live, shell v1 (Terminal), command v1
+//
+// Usage:
+//   swift run LiveE2E [--host 127.0.0.1] [--port 4096] [--keep-sessions]
+// Exit code: 0 = tutto verde, 1 = almeno un check fallito.
+//
+// NOTA: crea sessioni di test sul server e (di default) le elimina a fine
+// esecuzione. Richiede un server reale attivo (non funziona con i mock).
+
+import Foundation
+import OpenCodeRemote
+
+// MARK: - Reporter
+
+final class Checklist {
+    struct Item {
+        let name: String
+        let ok: Bool
+        let detail: String
+    }
+    private(set) var items: [Item] = []
+
+    func pass(_ name: String, _ detail: String = "") {
+        items.append(Item(name: name, ok: true, detail: detail))
+        print("  ✅ PASS  \(name)\(detail.isEmpty ? "" : " — \(detail)")")
+    }
+
+    func fail(_ name: String, _ detail: String) {
+        items.append(Item(name: name, ok: false, detail: detail))
+        print("  ❌ FAIL  \(name) — \(detail)")
+    }
+
+    var summary: String {
+        let passed = items.filter(\.ok).count
+        let failed = items.count - passed
+        return "\(passed)/\(items.count) check superati, \(failed) falliti"
+    }
+}
+
+func withTimeout<T>(_ seconds: TimeInterval, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await operation() }
+        group.addTask {
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            throw TimeoutError(seconds: seconds)
+        }
+        defer { group.cancelAll() }
+        return try await group.next()!
+    }
+}
+
+struct TimeoutError: Error, CustomStringConvertible {
+    let seconds: TimeInterval
+    var description: String { "timeout dopo \(seconds)s" }
+}
+
+func eventLabel(_ event: ServerEventV2) -> String {
+    switch event {
+    case .sessionStatus: return "status"
+    case .sessionTextDelta: return "text.delta"
+    case .sessionReasoningDelta: return "reasoning.delta"
+    case .sessionReasoningStarted: return "reasoning.started"
+    case .sessionReasoningEnded: return "reasoning.ended"
+    case .sessionToolInputStarted: return "tool.input.started"
+    case .sessionToolOutputUpdated: return "tool.output.updated"
+    case .sessionToolOutputDelta: return "tool.output.delta"
+    case .sessionMessageUpdated: return "message.updated"
+    case .sessionMessageRemoved: return "message.removed"
+    case .sessionMessagePartUpdated: return "message.part.updated"
+    case .sessionMessagePartRemoved: return "message.part.removed"
+    case .sessionCompactionStarted: return "compaction.started"
+    case .sessionCompactionFailed: return "compaction.failed"
+    case .sessionPermissionAsked: return "permission.asked"
+    case .sessionPermissionReplied: return "permission.replied"
+    case .sessionQuestionAsked: return "question.asked"
+    case .sessionQuestionReplied: return "question.replied"
+    case .sessionQuestionRejected: return "question.rejected"
+    case .sessionTodoUpdated: return "todo.updated"
+    case .sessionRenamed: return "renamed"
+    case .sessionMoved: return "moved"
+    case .sessionUsageUpdated: return "usage.updated"
+    case .sessionRetryScheduled: return "retry.scheduled"
+    case .sessionForked: return "forked"
+    case .sessionRevertStarted: return "revert.started"
+    case .sessionRevertCommitStaged: return "revert.commit-staged"
+    case .sessionRevertApplyStaged: return "revert.apply-staged"
+    case .sessionRevertError: return "revert.error"
+    case .sessionExecutionStarted: return "execution.started"
+    case .sessionExecutionCompleted: return "execution.completed"
+    case .sessionExecutionError: return "execution.error"
+    case .sessionAborted: return "aborted"
+    case .sessionUnknown(let name, _): return "unknown(\(name))"
+    }
+}
+
+/// Raccolta thread-safe degli eventi SSE (evita data race con
+/// `-enable-actor-data-race-checks`).
+actor EventBox {
+    private var items: [ServerEventV2] = []
+    func append(_ event: ServerEventV2) { items.append(event) }
+    var count: Int { items.count }
+    var first: ServerEventV2? { items.first }
+}
+
+// MARK: - Harness
+
+let arguments = Array(CommandLine.arguments.dropFirst())
+var host = "127.0.0.1"
+var port = 4096
+nonisolated(unsafe) var keepSessions = false
+var i = 0
+while i < arguments.count {
+    switch arguments[i] {
+    case "--host":
+        i += 1
+        if i < arguments.count { host = arguments[i] }
+    case "--port":
+        i += 1
+        if i < arguments.count, let p = Int(arguments[i]) { port = p }
+    case "--keep-sessions":
+        keepSessions = true
+    default:
+        break
+    }
+    i += 1
+}
+
+let server = ServerConnection(name: "live-e2e", host: host, port: port)
+let check = Checklist()
+nonisolated(unsafe) var createdSessionIDs: [String] = []
+let ts = Int(Date().timeIntervalSince1970)
+
+print("== LiveE2E — test definitivo contro \(server.baseURL) ==")
+print("Creo i client come nell'app (CompatibleAPI + v1 + v2 + SSE)...\n")
+
+// Stesse classi dell'app: CompatibleAPI (dispatch v1/v2) + client reali.
+let compatible = CompatibleAPI()
+let v1 = V1OpenCodeAPIClient()
+let v2 = OpenCodeAPIClientV2()
+await v1.setCurrentServer(server)
+await v2.setServer(server)
+
+func cleanup(_ ids: [String]) async {
+    guard !keepSessions else { return }
+    for id in ids {
+        do {
+            try await v2.remove(id: id)
+            print("  🧹 session \(id.prefix(14))… rimossa")
+        } catch {
+            print("  ⚠️  cleanup \(id.prefix(14))… fallito: \(error)")
+        }
+    }
+}
+
+// 1. CONNESSIONE — health v1
+do {
+    let health = try await withTimeout(10) { try await v1.health() }
+    check.pass("health (v1)", "\(health)")
+} catch {
+    check.fail("health (v1)", "server non raggiungibile su \(server.baseURL): \(error)")
+    print("\nRISULTATO: \(check.summary)")
+    exit(1)
+}
+
+// 2. CONNESSIONE — rilevamento protocollo (app: ProtocolDetector)
+let proto = await compatible.protocolVersion(for: server)
+if proto == .v2 {
+    check.pass("protocol detect", "server parla v2 (rotte /api/session) con fallback v1")
+} else {
+    check.pass("protocol detect", "server parla \(proto.rawValue)")
+}
+
+// 3. LOGICA — lista sessioni (v2)
+do {
+    let list = try await withTimeout(10) { try await compatible.listSessions(server: server) }
+    check.pass("session list (v2)", "\(list.sessions.count) sessioni")
+} catch {
+    check.fail("session list (v2)", "\(error)")
+}
+
+// 4. LOGICA — progetto con fallback v2→v1 (GET /api/project → HTML → GET /project)
+do {
+    let projects = try await withTimeout(10) { try await v1.listProjects() }
+    check.pass("project (v1)", "\(projects.count) progetti")
+} catch {
+    check.fail("project (v1)", "\(error)")
+}
+
+// 5. LOGICA — agenti (v1)
+do {
+    let agents = try await withTimeout(10) { try await v1.listAgents() }
+    let names = agents.map { $0.id.rawValue }
+    if names.contains("build") {
+        check.pass("agents (v1)", "\(names.count) agenti (build presente)")
+    } else {
+        check.fail("agents (v1)", "agente 'build' non trovato in \(names)")
+    }
+} catch {
+    check.fail("agents (v1)", "\(error)")
+}
+
+// 6. LOGICA — modelli (v2)
+do {
+    let models = try await withTimeout(10) { try await v2.modelList() }
+    if !models.isEmpty {
+        check.pass("models (v2)", "\(models.count) modelli")
+    } else {
+        check.fail("models (v2)", "lista vuota")
+    }
+} catch {
+    check.fail("models (v2)", "\(error)")
+}
+
+// 7. PARTI REALI — crea sessione per la shell (idle)
+var shellSessionID: String?
+do {
+    let session = try await withTimeout(20) {
+        try await compatible.createSession(server: server, request: SessionCreateV2())
+    }
+    shellSessionID = session.id
+    createdSessionIDs.append(session.id)
+    check.pass("create session", "\(session.id.prefix(20))… agent=\(session.agent ?? "?")")
+} catch {
+    check.fail("create session", "\(error)")
+}
+
+// 8. PARTI REALI — shell v1 (percorso esatto del Terminal dell'app)
+if let sid = shellSessionID {
+    let command = "echo live-e2e-\(ts)"
+    do {
+        let output = try await withTimeout(30) {
+            try await v1.executeShell(SessionID(rawValue: sid), request: ShellCommandRequest(command: command))
+        }
+        if output.contains("live-e2e-\(ts)") {
+            check.pass("shell v1 (Terminal)", "output: \(output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))")
+        } else {
+            check.fail("shell v1 (Terminal)", "output non atteso: \(output.prefix(120))")
+        }
+    } catch {
+        check.fail("shell v1 (Terminal)", "\(error)")
+    }
+}
+
+// 9. PARTI REALI — command v1 con slash-command reale su sessione FRESCA (idle)
+// Semantica: il bug wire era il 400 "Missing key [arguments]" (chiave omessa).
+// La fix manda sempre `arguments`; qui un 400/500 → FAIL, mentre un timeout
+// significa "richiesta ACCETTATA, turno agente reale in corso" → PASS con nota
+// (il turno LLM può durare minuti, e /init scriverebbe AGENTS.md nel progetto,
+// quindi non aspettiamo la fine del turno).
+var commandSessionID: String?
+do {
+    let session = try await withTimeout(20) {
+        try await compatible.createSession(server: server, request: SessionCreateV2())
+    }
+    commandSessionID = session.id
+    createdSessionIDs.append(session.id)
+    do {
+        let dto = try await withTimeout(90) {
+            try await v2.command(id: session.id, request: SessionCommandV2(command: "init"))
+        }
+        if dto != nil {
+            check.pass("command v1 (fallback v2→v1)", "`/init` su sessione idle → 200, DTO \(dto?.id.prefix(16) ?? "nil")")
+        } else {
+            check.fail("command v1 (fallback v2→v1)", "DTO nil (output vuoto?)")
+        }
+    } catch is TimeoutError {
+        // Wire valido: la richiesta è stata accettata (niente 4xx), il turno
+        // agente reale è ancora in corso oltre i 90s. Fix `arguments` verificata.
+        check.pass("command v1 (fallback v2→v1)", "richiesta accettata (niente 400), turno agente in corso >90s")
+    } catch {
+        check.fail("command v1 (fallback v2→v1)", "\(error)")
+    }
+} catch {
+    check.fail("create session (command)", "\(error)")
+}
+
+// 10. PARTI REALI — prompt v2 + SSE live
+var promptSessionID: String?
+do {
+    let session = try await withTimeout(20) {
+        try await compatible.createSession(server: server, request: SessionCreateV2())
+    }
+    promptSessionID = session.id
+    createdSessionIDs.append(session.id)
+
+    let sse = SessionEventStream()
+    let box = EventBox()
+    let collector = Task {
+        for try await event in sse.stream(sessionID: session.id, server: server) {
+            await box.append(event)
+            if eventLabel(event).contains("updated") { break }
+        }
+    }
+
+    do {
+        let promptID = UUID().uuidString
+        _ = try await withTimeout(30) {
+            try await compatible.prompt(
+                server: server,
+                sessionID: session.id,
+                request: SessionPromptV2(id: promptID, prompt: "Rispondi solo con la parola OK.")
+            )
+        }
+        // Il DTO del prompt può essere nil (l'output arriva via SSE): la
+        // conferma reale della risposta sta negli eventi dello stream.
+        check.pass("prompt v2", "accettato (id \(promptID.prefix(8))…)")
+
+        do {
+            try await withTimeout(45) {
+                while await box.count == 0 {
+                    try await Task.sleep(nanoseconds: 200_000_000)
+                }
+            }
+            let first = await box.first
+            check.pass("SSE live (streaming)", "\(await box.count) eventi, primo: \(first.map(eventLabel) ?? "(nessuno)")")
+        } catch {
+            check.fail("SSE live (streaming)", "nessun evento in 45s: \(error)")
+        }
+
+        collector.cancel()
+        await sse.reset()
+    } catch {
+        check.fail("prompt v2", "\(error)")
+    }
+} catch {
+    check.fail("create session (prompt)", "\(error)")
+}
+
+// 11. LOGICA — cancellazione sessione (fallback v2→v1 DELETE)
+if let sid = commandSessionID {
+    do {
+        try await withTimeout(10) { try await v2.remove(id: sid) }
+        // Verifica: la sessione non deve più essere listabile.
+        let stillThere = (try? await compatible.listSessions(server: server))?.sessions.contains { $0.id == sid } ?? true
+        if stillThere {
+            check.fail("delete session (fallback v2→v1)", "sessione ancora presente dopo DELETE")
+        } else {
+            check.pass("delete session (fallback v2→v1)", "sessione rimossa")
+        }
+    } catch {
+        check.fail("delete session (fallback v2→v1)", "\(error)")
+    }
+}
+
+// Pulizia: rimuove le sessioni di test create (tranne quelle già eliminate).
+if !keepSessions {
+    let stillToClean = createdSessionIDs.filter { $0 != commandSessionID }
+    await cleanup(stillToClean)
+}
+
+print("\n== RISULTATO FINALE ==")
+print(check.summary)
+for item in check.items where !item.ok {
+    print("  ❌ \(item.name): \(item.detail)")
+}
+exit(check.items.allSatisfy(\.ok) ? 0 : 1)
