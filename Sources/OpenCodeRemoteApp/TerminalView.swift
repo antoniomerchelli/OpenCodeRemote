@@ -168,7 +168,7 @@ final class TerminalViewModel {
         ))
     }
 
-    func executeCommand(_ command: String, sessionId: SessionID, apiClient: V1OpenCodeAPIClient) async {
+    func executeCommand(_ command: String, sessionId: SessionID, apiClient: V1OpenCodeAPIClient, agentId: AgentID? = nil, modelId: ModelID? = nil) async {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -189,7 +189,7 @@ final class TerminalViewModel {
         isExecuting = true
 
         do {
-            let output = try await apiClient.executeShell(sessionId, request: ShellCommandRequest(command: trimmed))
+            let output = try await apiClient.executeShell(sessionId, request: ShellCommandRequest(command: trimmed, agentId: agentId, modelId: modelId))
             if !output.isEmpty {
                 let lines = output.components(separatedBy: "\n")
                 for line in lines {
@@ -467,8 +467,15 @@ extension TerminalView {
         let input = viewModel.currentInput
         guard !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
+        // Il server 1.18 richiede `agent` nel body shell: passa l'agente (e il
+        // modello) della sessione corrente quando coincide con quella attiva.
+        let current = appState.currentSession
+        let matches = current?.id == sessionId
+        let agentId = matches ? current?.agentId : nil
+        let modelId = matches ? current?.modelId : nil
+
         Task {
-            await viewModel.executeCommand(input, sessionId: sessionId, apiClient: appState.apiClient)
+            await viewModel.executeCommand(input, sessionId: sessionId, apiClient: appState.apiClient, agentId: agentId, modelId: modelId)
         }
     }
 }

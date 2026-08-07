@@ -242,6 +242,42 @@ public protocol SSEClient: Sendable {
     var isConnected: Bool { get async }
 }
 
+// MARK: - V1 shell wire (reale server 1.18)
+
+/// Body di `POST /session/:id/shell` per il server reale 1.18: `{ command,
+/// agent, model: {providerID, modelID} }`. Il server rifiuta `agentId`/`modelId`
+/// con 400 `Missing key ["agent"]`; `model` è opzionale, `agent` è obbligatorio.
+private struct ShellExecuteBody: Encodable, Sendable {
+    let command: String
+    let agent: String
+    let model: ModelRefV2?
+}
+
+/// Risposta di `POST /session/:id/shell` del server reale 1.18:
+/// `{ info: Message, parts: [Part] }`. L'output del comando sta nel part
+/// `tool` → `state.output` a livello TOP (non dentro `info`). La forma
+/// legacy `{ output: "..." }` viene gestita separatamente in `executeShell`.
+private struct ShellExecuteEnvelope: Decodable, Sendable {
+    struct Info: Decodable, Sendable {
+        let parts: [Part]?
+    }
+    struct Part: Decodable, Sendable {
+        let type: String?
+        let state: State?
+    }
+    struct State: Decodable, Sendable {
+        let output: String?
+    }
+    let info: Info?
+    let parts: [Part]?
+
+    /// Output dal part `tool` (top-level preferito, poi `info.parts`).
+    var toolOutput: String? {
+        parts?.first(where: { $0.type == "tool" })?.state?.output
+            ?? info?.parts?.first(where: { $0.type == "tool" })?.state?.output
+    }
+}
+
 // MARK: - V1 API Client Implementation
 
 public actor V1OpenCodeAPIClient: OpenCodeAPIClient {
@@ -642,10 +678,44 @@ public actor V1OpenCodeAPIClient: OpenCodeAPIClient {
     
     public func executeShell(_ sessionId: SessionID, request: ShellCommandRequest) async throws -> String {
         let server = try requireServer()
-        let body = try encoder.encode(request)
-        let req = authenticatedRequest("POST", try url(for: "/session/\(sessionId.rawValue)/shell", server: server), server: server, body: body)
-        let response: [String: String] = try await perform(req)
-        return response["output"] ?? ""
+        let body = ShellExecuteBody(
+            command: request.command,
+            // Il server 1.18 richiede `agent` (default: agente build).
+            agent: request.agentId?.rawValue ?? "build",
+            model: request.modelId.map { ModelRefV2(providerID: $0.rawValue, modelID: $0.rawValue) }
+        )
+        let data = try encoder.encode(body)
+        let req = authenticatedRequest("POST", try url(for: "/session/\(sessionId.rawValue)/shell", server: server), server: server, body: data)
+        return try await performShell(req)
+    }
+
+    /// Decodifica la risposta di `POST /session/:id/shell` in entrambe le
+    /// forme wire: legacy `{ output: "..." }` e reale 1.18 `{ info, parts }`
+    /// (output nel part `tool` → `state.output`).
+    private func performShell(_ request: URLRequest) async throws -> String {
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenCodeError.invalidResponse
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            if let errorResponse = try? decoder.decode(ErrorResponse.self, from: data) {
+                throw OpenCodeError.apiError(errorResponse.error, httpResponse.statusCode)
+            }
+            // Body errore reale 1.18: `{ name, data: { message, kind } }`.
+            if let named = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let box = named["data"] as? [String: Any],
+               let message = box["message"] as? String {
+                throw OpenCodeError.apiError(message, httpResponse.statusCode)
+            }
+            throw OpenCodeError.httpError(httpResponse.statusCode)
+        }
+        if let legacy = try? decoder.decode([String: String].self, from: data), let output = legacy["output"] {
+            return output
+        }
+        if let envelope = try? decoder.decode(ShellExecuteEnvelope.self, from: data) {
+            return envelope.toolOutput ?? ""
+        }
+        return ""
     }
     
     // MARK: - Files
