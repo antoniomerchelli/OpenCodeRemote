@@ -102,10 +102,15 @@ final class OpenCodeAPIClientV2FallbackTests: XCTestCase {
     /// Estrae il testo della prima parte test dal `content` grezzo del DTO
     /// (il wire v2 dell'assistant mette le parti sotto `content`).
     private func firstTextPartText(from dto: MessageV2DTO?) -> String? {
-        guard let dto,
-              case .array(let parts)? = dto.raw["content"],
-              case .object(let first)? = parts.first else { return nil }
-        return first["text"]?.stringValue
+        // Le parti v1 (step-start/step-finish) diventano text parti vuote:
+        // si prende il primo testo NON vuoto (come fa la UI).
+        guard let parts = dto?.parts else { return nil }
+        for part in parts {
+            if case .text(let t) = part, !t.text.isEmpty {
+                return t.text
+            }
+        }
+        return nil
     }
 
     override func tearDown() async throws {
@@ -137,12 +142,13 @@ final class OpenCodeAPIClientV2FallbackTests: XCTestCase {
 
     /// `shell` con rotta v2 assente: la seconda richiesta va su
     /// `POST /session/ses_123/shell` e il DTO riporta `raw["output"]`.
-    /// Il body della prima richiesta v2 contiene il comando.
+    /// Fixture nel wire REALE 1.18: `{ info, parts }` con l'output nel part
+    /// `tool` → `state.output` a livello TOP (non dentro `info`).
     func testShellFallsBackToV1Route() async throws {
         let responder = ScriptedResponder()
         responder.enqueue(htmlBody, for: "/api/session/ses_123/shell")
         responder.enqueue(
-            #"{"info": {"id": "msg_shell1", "parts": [{"type": "tool", "tool": "bash", "state": {"status": "completed", "output": "fallback output"}}]}}"#,
+            #"{"info": {"id": "msg_shell1", "sessionID": "ses_123", "role": "assistant"}, "parts": [{"type": "tool", "tool": "bash", "state": {"status": "completed", "output": "fallback output"}}]}"#,
             for: "/session/ses_123/shell"
         )
         responder.install()
@@ -175,13 +181,32 @@ final class OpenCodeAPIClientV2FallbackTests: XCTestCase {
         XCTAssertEqual(model?["modelID"] as? String, "claude-3")
     }
 
+    /// Compat all'indietro: forma legacy con `parts` dentro `info` (mai usata
+    /// dal server reale, ma i fixture storici la usavano).
+    func testShellFallbackLegacyInfoPartsShape() async throws {
+        let responder = ScriptedResponder()
+        responder.enqueue(htmlBody, for: "/api/session/ses_123/shell")
+        responder.enqueue(
+            #"{"info": {"id": "msg_legacy", "parts": [{"type": "tool", "tool": "bash", "state": {"output": "legacy output"}}]}}"#,
+            for: "/session/ses_123/shell"
+        )
+        responder.install()
+
+        let client = await makeClient(server: .testConnection())
+        let dto = try await client.shell(id: "ses_123", request: SessionShellV2(command: "echo"))
+
+        XCTAssertEqual(dto?.raw["output"]?.stringValue, "legacy output")
+        XCTAssertEqual(responder.requestCount(on: "/session/ses_123/shell"), 1)
+    }
+
     /// `command` con rotta v2 assente: il DTO deriva dal messaggio v1
-    /// (`{ info: Message }`), testo leggibile nel `content` grezzo.
+    /// (`{ info, parts }` con le parti a livello TOP, wire reale 1.18),
+    /// testo leggibile nel `content` grezzo.
     func testCommandFallsBackToV1Route() async throws {
         let responder = ScriptedResponder()
         responder.enqueue(htmlBody, for: "/api/session/ses_123/command")
         responder.enqueue(
-            #"{"info": {"id": "m-42", "sessionID": "ses_123", "role": "assistant", "time": {"created": 1720000000000}, "parts": [{"type": "text", "text": "Risposta del comando /status"}]}}"#,
+            #"{"info": {"id": "m-42", "sessionID": "ses_123", "role": "assistant", "time": {"created": 1720000000000}}, "parts": [{"type": "step-start"}, {"type": "text", "text": "Risposta del comando /status"}, {"type": "step-finish"}]}"#,
             for: "/session/ses_123/command"
         )
         responder.install()

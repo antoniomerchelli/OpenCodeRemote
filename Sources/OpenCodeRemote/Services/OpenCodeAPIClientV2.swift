@@ -35,9 +35,11 @@ private struct V1ShellBody: Encodable, Equatable, Hashable, Sendable {
 }
 
 /// Risposta v1 di `POST /session/:id/shell`: `{ info: Message, parts: [...] }`.
-/// L'output del comando sta nel part `tool` → `state.output` (non in `{output}`).
+/// L'output del comando sta nel part `tool` → `state.output` a livello TOP
+/// (wire reale 1.18); `info.parts` è la forma legacy (mai presente nel reale).
 private struct V1ShellResponse: Decodable, Equatable, Hashable, Sendable {
     let info: V1ShellInfo?
+    let parts: [V1ShellPart]?
 
     /// `info` del messaggio assistant creato dal server.
     struct V1ShellInfo: Decodable, Equatable, Hashable, Sendable {
@@ -55,6 +57,13 @@ private struct V1ShellResponse: Decodable, Equatable, Hashable, Sendable {
     struct V1ShellState: Decodable, Equatable, Hashable, Sendable {
         let output: String?
     }
+
+    /// Output dal part `tool` (top-level preferito, poi `info.parts`).
+    var toolOutput: String {
+        parts?.first(where: { $0.type == "tool" })?.state?.output
+            ?? info?.parts?.first(where: { $0.type == "tool" })?.state?.output
+            ?? ""
+    }
 }
 
 /// Body v1 di `POST /session/:id/command` (fallback quando la rotta v2 manca).
@@ -69,9 +78,13 @@ private struct V1CommandBody: Encodable, Equatable, Hashable, Sendable {
     let arguments: String?
 }
 
-/// Risposta v1 di `POST /session/:id/command`: `{ info: Message }`.
+/// Risposta v1 di `POST /session/:id/command`: `{ info: Message, parts: [...] }`.
+/// Le parti del messaggio (testo/reasoning) stanno a livello TOP nel wire
+/// reale 1.18 (l'`info` non le contiene) e vanno riattaccate al messaggio
+/// prima del mapping a dominio v2.
 private struct V1CommandResponse: Decodable, Equatable, Hashable, Sendable {
     let info: Message?
+    let parts: [MessagePart]?
 }
 
 // MARK: - OpenCodeAPIClientV2
@@ -571,12 +584,9 @@ public actor OpenCodeAPIClientV2 {
             )
             let response: V1ShellResponse? = try await performOptional("POST", path: "/session/\(id)/shell", body: body, timeout: turnTimeout)
             guard let info = response?.info else { return nil }
-            let output = info.parts?
-                .first(where: { $0.type == "tool" })?
-                .state?.output ?? ""
             return MessageV2DTO(
                 id: info.id ?? "shell-\(UUID().uuidString)",
-                raw: ["output": .string(output)]
+                raw: ["output": .string(response?.toolOutput ?? "")]
             )
         }
     }
@@ -597,8 +607,19 @@ public actor OpenCodeAPIClientV2 {
                 arguments: request.arguments?.joined(separator: " ")
             )
             let response: V1CommandResponse? = try await performOptional("POST", path: "/session/\(id)/command", body: body, timeout: turnTimeout)
-            guard let info = response?.info,
-                  let mapped = SessionMessageMapperV2.mapV1ToV2(info) else {
+            guard let info = response?.info else { return nil }
+            // Le parti reali sono a livello top (`parts`); `info.parts` è la
+            // forma legacy. Ricostruisce il messaggio v1 completo e lo mappa.
+            let fullMessage = Message(
+                id: info.id,
+                sessionId: info.sessionId,
+                role: info.role,
+                parts: response?.parts ?? info.parts,
+                createdAt: info.createdAt,
+                agentId: info.agentId,
+                modelId: info.modelId
+            )
+            guard let mapped = SessionMessageMapperV2.mapV1ToV2(fullMessage) else {
                 return nil
             }
             // Round-trip message → DTO passando da JSONValue, con il
