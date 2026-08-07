@@ -46,7 +46,22 @@ public actor OpenCodeAPIClientV2 {
         self.session = session
         self.decoder = JSONDecoder()
         self.encoder = JSONEncoder()
-        self.decoder.dateDecodingStrategy = .iso8601
+        self.decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            // Server 1.18: `time.*` in millisecondi numerici.
+            if let ms = try? container.decode(Double.self) {
+                return Date(timeIntervalSince1970: ms / 1_000)
+            }
+            let string = try container.decode(String.self)
+            if let date = ISO8601DateFormatter().date(from: string) { return date }
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = fractional.date(from: string) { return date }
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Data non ISO8601 né millisecondi: \(string)"
+            ))
+        }
         self.encoder.dateEncodingStrategy = .iso8601
     }
 
@@ -121,7 +136,7 @@ public actor OpenCodeAPIClientV2 {
             throw ServerError.fromResponse(statusCode: http.statusCode, body: data)
         }
         do {
-            return try decoder.decode(T.self, from: data)
+            return try Self.decodeLenient(T.self, from: data, decoder: decoder)
         } catch {
             throw ServerError(
                 kind: .invalidResponse,
@@ -167,7 +182,7 @@ public actor OpenCodeAPIClientV2 {
                 throw ServerError.fromResponse(statusCode: http.statusCode, body: data)
             }
             guard !data.isEmpty else { return nil }
-            return try decoder.decode(T.self, from: data)
+            return try Self.decodeLenient(T.self, from: data, decoder: decoder)
         } catch let error as ServerError {
             throw error
         } catch {
@@ -176,6 +191,26 @@ public actor OpenCodeAPIClientV2 {
     }
 
     private struct EmptyV2Response: Decodable {}
+
+    /// Decodifica leniente rispetto all'envelope `{ "data": ... }` del server
+    /// reale: prova prima il decode diretto di `T` dal body; se fallisce, tenta
+    /// di estrarre il valore sotto la chiave `data` e decodificarlo come `T`.
+    /// Le liste (mock: array nudo, reale: `{data:[...]}`) funzionano in entrambe
+    /// le forme perché `decode` su un array nudo non tocca l'envelope.
+    private static func decodeLenient<T: Decodable>(_ type: T.Type, from data: Data, decoder: JSONDecoder) throws -> T {
+        if let direct = try? decoder.decode(T.self, from: data) {
+            return direct
+        }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let nested = object["data"] else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: [],
+                debugDescription: "Nessuna chiave `data` nell'envelope per \(String(describing: T.self))"
+            ))
+        }
+        let nestedData = try JSONSerialization.data(withJSONObject: nested)
+        return try decoder.decode(T.self, from: nestedData)
+    }
 
     private func performNoContent(
         _ method: String,
@@ -373,6 +408,7 @@ public actor OpenCodeAPIClientV2 {
             metadata: dict["metadata"],
             time: partTime(from: dict),
             content: dict["content"],
+            text: dict["text"]?.stringValue,
             raw: dict
         )
     }

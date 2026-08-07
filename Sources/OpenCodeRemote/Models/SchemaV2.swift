@@ -83,13 +83,27 @@ public struct SessionInfoV2: Identifiable, Equatable, Hashable, Codable, Sendabl
         case directory
     }
 
+    /// Wire del modello: il server reale invia `{ id, providerID, variant }`,
+    /// il mock una stringa nuda. Il decoder accetta entrambe le forme.
+    private struct ModelRefWire: Decodable {
+        let id: String?
+        let modelID: String?
+    }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         parentID = try c.decodeIfPresent(String.self, forKey: .parentID)
         projectID = try c.decodeIfPresent(String.self, forKey: .projectID)
         agent = try c.decodeIfPresent(String.self, forKey: .agent)
-        model = try c.decodeIfPresent(String.self, forKey: .model)
+        // model: stringa nuda (mock) o oggetto `{ id, modelID, ... }` (wire reale).
+        if let plain = try? c.decodeIfPresent(String.self, forKey: .model) {
+            model = plain
+        } else if let ref = try? c.decodeIfPresent(ModelRefWire.self, forKey: .model) {
+            model = ref.id ?? ref.modelID
+        } else {
+            model = nil
+        }
         cost = try c.decodeIfPresent(Double.self, forKey: .cost)
         tokens = try c.decodeIfPresent(Int.self, forKey: .tokens)
         time = try c.decodeIfPresent(SessionTimeV2.self, forKey: .time)

@@ -248,13 +248,10 @@ public final class AppState: Sendable {
             }
         }
         
-        // Load initial data
-        try await loadInitialData()
-        await loadModels()
-        
-        // Cablaggio percorso v2 (non fatale): con un server v2 la chat e la
-        // lista sessioni v2 si attivano; con un server v1 restano inattive
-        // ma la connessione v1 continua a funzionare normalmente.
+        // Cablaggio percorso v2 (non fatale): attivato PRIMA del caricamento
+        // dati v1, così la chat v2 non dipende mai dal successo dei dati
+        // legacy (un fallimento di listProjects/listSessions non deve più
+        // impedire l'attivazione del percorso v2).
         do {
             try await connectV2(to: server)
             v2ConnectionError = nil
@@ -262,6 +259,11 @@ public final class AppState: Sendable {
             v2ConnectionError = error.localizedDescription
             // Nessun percorso v2 disponibile: si prosegue solo con v1.
         }
+        
+        // Load initial data (best-effort: un fallimento non deve bloccare la
+        // connessione né il percorso v2 già attivato).
+        await loadInitialData()
+        await loadModels()
         startEvictionTask()
     }
     
@@ -610,22 +612,61 @@ public final class AppState: Sendable {
     
     // MARK: - Private Methods
     
-    private func loadInitialData() async throws {
+    private func loadInitialData() async {
+        // Best-effort: ogni chiamata è indipendente. Un fallimento (es. il
+        // server reale non espone /project o /session con il formato v1)
+        // non deve far fallire le altre né bloccare la connessione.
         async let projects = apiClient.listProjects()
         async let sessions = apiClient.listSessions()
         async let statuses = apiClient.getSessionsStatus()
         
-        let (loadedProjects, loadedSessions, loadedStatuses) = try await (projects, sessions, statuses)
+        let loadedProjects = (try? await projects) ?? []
+        let loadedSessions = (try? await sessions) ?? []
+        let loadedStatuses = (try? await statuses) ?? [:]
+        
+        // currentProject: il formato legacy espone il flag isCurrent; il
+        // server reale usa l'endpoint separato /project/current.
+        var currentProject: Project? = loadedProjects.first(where: { $0.isCurrent })
+        if currentProject == nil {
+            currentProject = try? await apiClient.getCurrentProject()
+            // Il server reale non invia il flag: lo impostiamo esplicitamente
+            // per i consumatori UI che lo leggono.
+            currentProject?.isCurrent = true
+        }
         
         await MainActor.run {
-            self.currentProject = loadedProjects.first(where: { $0.isCurrent })
-            self.activeSessions = loadedSessions.map { session in
+            if let currentProject {
+                self.currentProject = currentProject
+            }
+            // MERGE per id (non replace totale): il percorso v2 può aver già
+            // popolato activeSessions tramite mergeV2Sessions; sovrascrivere
+            // l'array con i dati v1 (eventualmente vuoti) svuoterebbe la lista.
+            let incoming = loadedSessions.map { session in
                 var s = session
                 if let status = loadedStatuses[session.id] {
                     s.status = status
                 }
                 return s
             }
+            var merged = self.activeSessions
+            for session in incoming {
+                if let idx = merged.firstIndex(where: { $0.id == session.id }) {
+                    var existing = merged[idx]
+                    existing.title = session.title
+                    existing.agentId = session.agentId
+                    existing.modelId = session.modelId
+                    existing.createdAt = session.createdAt
+                    existing.updatedAt = session.updatedAt
+                    existing.directory = session.directory
+                    if let status = loadedStatuses[session.id] {
+                        existing.status = status
+                    }
+                    merged[idx] = existing
+                } else {
+                    merged.append(session)
+                }
+            }
+            self.activeSessions = merged.sorted { $0.updatedAt > $1.updatedAt }
         }
     }
     

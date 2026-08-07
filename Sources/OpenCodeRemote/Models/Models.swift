@@ -226,6 +226,75 @@ public struct Project: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.vcsStatus = vcsStatus
         self.lastAccessed = lastAccessed
     }
+    
+    // Custom Codable: gestisce sia il formato legacy sia quello del server
+    // opencode reale. Il server reale usa: worktree (path), time.created/updated
+    // (timestamp ms), vcs (stringa "git"), sandboxes — e NON invia name/isCurrent.
+    private enum CodingKeys: String, CodingKey {
+        case id, name, path, isCurrent, vcsStatus, lastAccessed
+        case worktree, vcs, time
+    }
+    
+    private struct TimeWrapper: Codable {
+        let created: Double?
+        let updated: Double?
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // id
+        let rawID = (try? c.decode(String.self, forKey: .id)) ?? "global"
+        self.id = ProjectID(rawValue: rawID)
+        
+        // path — server reale invia "worktree"
+        let rawPath = (try? c.decode(String.self, forKey: .worktree))
+            ?? (try? c.decode(String.self, forKey: .path))
+            ?? "/"
+        self.path = rawPath
+        
+        // name — il server reale non lo invia: lo deriviamo dal worktree
+        // (ultimo componente; "global" per la root "/")
+        if let n = try? c.decode(String.self, forKey: .name), !n.isEmpty {
+            self.name = n
+        } else if rawPath == "/" {
+            self.name = "global"
+        } else {
+            let trimmed = rawPath.hasSuffix("/") ? String(rawPath.dropLast()) : rawPath
+            let last = (trimmed as NSString).lastPathComponent
+            self.name = last.isEmpty ? "global" : last
+        }
+        
+        // isCurrent — il server reale usa /project/current, non un flag
+        self.isCurrent = (try? c.decode(Bool.self, forKey: .isCurrent)) ?? false
+        
+        // vcsStatus — il server reale invia solo la stringa "vcs" ("git")
+        if let vcs = try? c.decode(VCSStatus.self, forKey: .vcsStatus) {
+            self.vcsStatus = vcs
+        } else {
+            self.vcsStatus = nil
+        }
+        
+        // lastAccessed — server reale: time.updated (ms epoch). Se il timestamp
+        // manca usiamo l'epoca (0) invece di "adesso": un progetto senza
+        // timestamp non deve apparire come appena usato.
+        if let tw = try? c.decode(TimeWrapper.self, forKey: .time) {
+            let ms = tw.updated ?? tw.created ?? 0
+            self.lastAccessed = ms > 0 ? Date(timeIntervalSince1970: ms / 1000) : Date(timeIntervalSince1970: 0)
+        } else {
+            self.lastAccessed = (try? c.decode(Date.self, forKey: .lastAccessed)) ?? Date(timeIntervalSince1970: 0)
+        }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id.rawValue, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(path, forKey: .path)
+        try c.encode(isCurrent, forKey: .isCurrent)
+        try c.encodeIfPresent(vcsStatus, forKey: .vcsStatus)
+        try c.encode(lastAccessed, forKey: .lastAccessed)
+    }
 }
 
 public struct VCSStatus: Equatable, Hashable, Codable, Sendable {

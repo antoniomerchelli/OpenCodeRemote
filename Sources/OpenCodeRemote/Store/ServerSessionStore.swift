@@ -268,7 +268,7 @@ public actor ServerSessionStore {
         meta.loading = true
         defer { meta.loading = false }
         do {
-            let page = try await api.historyPage(id: sessionID, limit: limit, before: before)
+            let page = try await Self.fetchPage(api: api, id: sessionID, limit: limit, before: before)
             let incoming = page.messages.compactMap(SessionMessageDTOMapperV2.map)
             switch mode {
             case .replace:
@@ -295,6 +295,25 @@ public actor ServerSessionStore {
             }
         } catch {
             // Fetch fallito: lo stato precedente resta valido.
+        }
+    }
+
+    /// Carica una pagina di messaggi. Il wire reale usa `GET /api/session/:id/message`
+    /// (risposta `{data, cursor}` con cursor `previous` per paginare verso i più
+    /// vecchi); il mock usa `GET /api/session/:id/history` (fallback).
+    private static func fetchPage(
+        api: OpenCodeAPIClientV2,
+        id: String,
+        limit: Int,
+        before: String?
+    ) async throws -> (messages: [MessageV2DTO], nextCursor: String?) {
+        do {
+            let list = try await api.messageList(id: id, limit: limit, order: "asc", cursor: before)
+            let cursor = list.cursor?.prev ?? list.cursor?.next
+            return (list.messages, cursor)
+        } catch {
+            let page = try await api.historyPage(id: id, limit: limit, before: before)
+            return (page.messages, page.nextCursor)
         }
     }
 
@@ -628,6 +647,10 @@ private enum SessionMessageDTOMapperV2: Sendable {
             }
         }
         if userParts.isEmpty, case .string(let s)? = dto.content, !s.isEmpty {
+            text = s
+            userParts = [.text(UserTextPartV2(text: s))]
+        } else if userParts.isEmpty, let s = dto.text, !s.isEmpty {
+            // Wire reale: i messaggi user hanno `text` top-level (no `content`).
             text = s
             userParts = [.text(UserTextPartV2(text: s))]
         }
