@@ -18,8 +18,10 @@ Il repo è un **Swift Package** (`Package.swift`) con XcodeGen
 `.xcodeproj` committato**: si genera con `./setup_xcode_project.sh`
 (richiede `xcodegen`).
 
-Stato: **181/181 test verdi** (`swift test`, ~3.5s su macOS), build iOS
-Simulator OK. Server reale analizzato: **opencode 1.18.15** (attivo, PID 10393,
+Stato: **185/185 test verdi** (`swift test`, ~3.5s su macOS), build iOS
+Simulator OK. **Test definitivo LiveE2E 12/12** contro il server reale
+(ha scoperto e corretto 3 bug wire — vedi §5b). Server reale analizzato:
+**opencode 1.18.15** (attivo, PID 10393,
 `opencode serve --port 4096 --hostname 0.0.0.0`).
 
 ---
@@ -106,9 +108,9 @@ la richiesta sulla rotta v1.
 
 ## 4. Stato del progetto
 
-**181/181 test verdi**, build iOS Simulator OK. **10 commit vecchi + fix
-sessione 18 NON ancora pushati** su `origin/main`. Il collegamento app →
-iPhone NON è ancora verificato dal vivo.
+**185/185 test verdi**, build iOS Simulator OK. **Tutto committato e pushato
+su `origin/main`** (sessioni 18 + 19). **Test definitivo LiveE2E 12/12** contro
+il server reale. Il collegamento app → iPhone NON è ancora verificato dal vivo.
 
 ```
 P1 [✅ COMMITTATO]       Fallback automatico v1 per remove/shell/command (commit 026f82c)
@@ -119,10 +121,11 @@ P5 [IN CORSO ⚠️]        Collegamento app → iPhone (trust profilo + test li
 P6 [✅ COMPLETATO]       Build iOS device + installazione su iPhone 14 Pro
 P7 [✅ COMPLETATO]       Wire shell v1 allineato al reale + test
 P8 [✅ COMPLETATO]       Wire command v1 allineato al reale + test
-P9 [✅ FATTO, DA PUSHARE] Fix sessione 18: Terminal + fallback shell/command wire reale
+P9 [✅ COMMITTATO+PUSHATO] Fix sessione 18: Terminal + fallback shell/command wire reale
+P10 [✅ COMPLETATO]      Test definitivo LiveE2E 12/12 + 3 bug wire corretti (sessione 19)
 ```
 
-## 5. Modifiche sessione 18 (da committare)
+## 5. Modifiche sessione 18 (COMMITTATE E PUSHATE — commit 8338e19, 7f3ca02, 16518c0)
 
 1. **`V1OpenCodeAPIClient.executeShell`** (Terminal) — era rotto contro il
    server reale per DUE motivi, entrambi fixati:
@@ -148,6 +151,33 @@ P9 [✅ FATTO, DA PUSHARE] Fix sessione 18: Terminal + fallback shell/command wi
    File: `Sources/OpenCodeRemote/Services/OpenCodeAPIClientV2.swift`.
 5. **Test**: fixture fallback aggiornati al wire reale (parti top-level) +
    nuovo `Tests/OpenCodeRemoteTests/V1ExecuteShellTests.swift` (5 test).
+
+## 5b. Sessione 19 — Test definitivo LiveE2E (COMMITTATO E PUSHATO: 27ace74, 31fe951, d84f449, 64e9ba2)
+
+**Harness `Tools/LiveE2E`** (target eseguibile in `Package.swift`): usa le
+STESSE classi dell'app contro il server reale. `swift run LiveE2E --host
+127.0.0.1 --port 4096` → **12/12 check verdi**, exit 0. Check: health,
+protocol detect, session list, project v1, agents v1, models v2, create
+session, shell v1 (Terminal), command v1 fallback, prompt v2 + SSE live,
+delete fallback, cleanup sessioni test (`--keep-sessions` per debug).
+
+Ha scoperto **3 bug wire reali**, tutti corretti:
+1. **`GET /agent` (v1) non ha `id`** — identità = `name`, permessi come array
+   di regole `{permission, pattern, action}`, molti campi assenti →
+   `Agent.init(from:)` leniente (id→name, default, mapping allow/ask/deny).
+   File: `Sources/OpenCodeRemote/Models/Models.swift`.
+2. **`GET /api/model` (v2)**: `cost` è ARRAY (`[{input, output, cache}]`) →
+   `ModelV2.init(from:)` gestisce singolo/array/numero. (L'envelope
+   `{location, data}` era già coperto da `decodeLenient`.)
+   File: `Sources/OpenCodeRemote/Models/DTOV2.swift`.
+3. **command v1**: chiave `arguments` OBBLIGATORIA (400 `Missing key
+   ["arguments"]` se omessa) → `V1CommandBody.arguments` non-opzionale ("").
+   File: `Sources/OpenCodeRemote/Services/OpenCodeAPIClientV2.swift`.
+
+Regressione: `Tests/OpenCodeRemoteTests/RealWireDecodingTests.swift` (4 test).
+⚠️ `/init` è l'unico slash-command e SCRIVE `AGENTS.md` nel progetto: il check
+command non attende il completamento del turno (timeout = "accettata, no 4xx"
+→ PASS); dopo un run completo controllare `git status` (artefatto rimosso).
 
 ## 6. Problemi noti e rischi
 
@@ -207,6 +237,14 @@ Passi:
   (su sessione IDLE con slash-command reale → 200; su sessione busy o nome
   inesistente → 500 `UnknownError`)
 - Delete v1: `curl -s -X DELETE http://127.0.0.1:4096/session/:id`
+- Agent v1 (NOTA: NIENTE `id` — usare `name`): `curl -s http://127.0.0.1:4096/agent`
+- Model v2 (envelope `{location, data}` con `cost` array): `curl -s http://127.0.0.1:4096/api/model`
+
+### Test definitivo LiveE2E (reale)
+
+- `swift run LiveE2E --host 127.0.0.1 --port 4096` → 12/12 check, exit 0.
+  Usa le classi dell'app contro il server reale. Flag: `--keep-sessions`
+  (non eliminare le sessioni di test), exit ≠ 0 se qualche check fallisce.
 
 ### Fixture wire reale (catturati con curl il 7 ago)
 
@@ -216,14 +254,15 @@ Passi:
 
 ## 9. Prossimi passi
 
-1. **Push**: 10 commit locali (fino a `dacba18`) + commit fix sessione 18 —
-   chiedere conferma. Poi eliminare branch `backup/session-15-wip` (già
-   mergiato).
-2. **Test collegamento app → iPhone** (vedi §7): device via USB, trust profilo,
-   collegamento a `http://169.254.31.57:4096`.
-3. **Verifica dal vivo** da iPhone: lista sessioni, apertura sessione vecchia
+1. **Test collegamento app → iPhone** (vedi §7): device via USB, trust profilo,
+   collegamento a `http://169.254.31.57:4096`. L'app su iPhone resta l'unico
+   livello non ancora verificato dal vivo (L5).
+2. **Verifica dal vivo** da iPhone: lista sessioni, apertura sessione vecchia
    (merge), invio messaggio (prompt v2), shell dal Terminal, cancellazione
    sessione.
+3. **LiveE2E su iOS Simulator (L4, opzionale)**: build + launch del target
+   iOS contro il server reale per coprire il path UI (la CLI copre già
+   connessione/logica/wire).
 4. Aggiornare questa HANDOFF con gli esiti del test live.
 
 ## 10. URL e risorse utili
