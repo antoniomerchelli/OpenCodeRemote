@@ -16,12 +16,11 @@ terminale e le richieste di permesso sul telefono.
 Il repo è un **Swift Package** (`Package.swift`) con XcodeGen
 (`project.yml`) per generare il `.xcodeproj` iOS. **NON esiste un
 `.xcodeproj` committato**: si genera con `./setup_xcode_project.sh`
-(richiede `xcodegen`, fallback a `swift package generate-xcodeproj`).
+(richiede `xcodegen`).
 
-Stato: **162/162 test verdi** (`swift test`, ~3.7s su macOS). Lavoro in corso
-NON ancora committato (vedi §4). Il server reale analizzato è **opencode
-1.18.14 @ 192.168.1.133:4096** (attualmente offline; al momento della
-verifica live non rispondeva più).
+Stato: **181/181 test verdi** (`swift test`, ~3.5s su macOS), build iOS
+Simulator OK. Server reale analizzato: **opencode 1.18.15** (attivo, PID 10393,
+`opencode serve --port 4096 --hostname 0.0.0.0`).
 
 ---
 
@@ -32,14 +31,14 @@ opencode remote/
 ├── Package.swift                       # SPM: 5 target (vedi sotto)
 ├── Package.resolved
 ├── project.yml                         # Spec XcodeGen per il progetto iOS
-├── setup_xcode_project.sh              # Genera .xcodeproj + signing (DEVELOPMENT_TEAM)
+├── setup_xcode_project.sh              # Genera .xcodeproj + signing
 ├── README.md
 ├── ARCHITETTURA_CORE.md                # Doc architettura (aggiornarla se cambia il core)
 ├── PIANO_IMPLEMENTAZIONE_IOS.md        # Piano F1-F8 (contesto storico)
 ├── ANALISI_COMPLETA_OPENCODE_WEB.md    # Spec wire del web opencode (v1+v2)
 ├── HANDOFF_NEXT_AI.md                  # QUESTO FILE
 ├── Sources/
-│   ├── OpenCodeRemote/                 # Framework core (piattaforma: iOS+macOS via SPM)
+│   ├── OpenCodeRemote/                 # Framework core (iOS+macOS via SPM)
 │   │   ├── Core/CoreConstants.swift    # Timeout, TTL, costanti
 │   │   ├── Models/
 │   │   │   ├── Models.swift            # Dominio v1 (Message, Session, PromptData, …)
@@ -47,13 +46,13 @@ opencode remote/
 │   │   │   └── SchemaV2.swift          # Dominio v2 (MessageV2, SessionInfoV2, …)
 │   │   ├── Services/
 │   │   │   ├── APIClient.swift         # CLIENT V1 (V1OpenCodeAPIClient + protocol OpenCodeAPIClient)
-│   │   │   ├── OpenCodeAPIClientV2.swift  # CLIENT V2 (actor) — PROBLEMA P1
+│   │   │   ├── OpenCodeAPIClientV2.swift  # CLIENT V2 (actor)
 │   │   │   ├── CompatibleAPI.swift     # Dispatch v1/v2 in base al protocolVersion
 │   │   │   ├── ProtocolDetector.swift  # Probes /session (v1) vs /api/session (v2)
 │   │   │   ├── SessionEventStream.swift    # SSE globale v2 (/api/event) + coalescer
 │   │   │   ├── EventCoalescer.swift    # Batch dei delta di testo
 │   │   │   ├── TextDeltaAccumulator.swift  # Accumulo delta → testo
-│   │   │   ├── SessionMessageMapperV2.swift # Mapping v1↔v2 (mapV1ToV2, mapV2ToV1) — P2
+│   │   │   ├── SessionMessageMapperV2.swift # Mapping v1↔v2 (mapV1ToV2, mapV2ToV1)
 │   │   │   ├── ShellCommandRunner.swift    # Runner shell/command v2 (NON in UI)
 │   │   │   ├── AppState.swift          # Stato app globale (server, sessioni, sync)
 │   │   │   ├── PermissionAutoResponder.swift
@@ -61,7 +60,7 @@ opencode remote/
 │   │   │   ├── PersistStore.swift, KeychainClient.swift, FaceIDClient.swift
 │   │   │   ├── RecentModelsStore.swift, RevertStagingStore.swift, WorktreeManager.swift
 │   │   ├── Store/
-│   │   │   ├── ServerSessionStore.swift    # Store per-sessione v2 — PROBLEMA P2
+│   │   │   ├── ServerSessionStore.swift    # Store per-sessione v2
 │   │   │   ├── SessionStorePool.swift, DirectoryStoreManager.swift
 │   │   │   ├── HealthMonitor.swift, BootstrapQueue.swift
 │   │   ├── Utils/ServerError.swift     # Tassonomia errori normalizzati
@@ -73,25 +72,12 @@ opencode remote/
 │   │   ├── OpenCodeIntents.swift, OpenCodeWidget.swift, SessionActivityAttributes.swift
 │   │   └── Resources/ (Info.plist, Assets.xcassets, PrivacyInfo.xcprivacy)
 │   └── OpenCodeWidgets/main.swift      # Esecutabile harness CLI (test manuali)
-├── Tools/MockServer/main.swift         # Mock HTTP+SSE del server opencode — PROBLEMA P3
-├── Tests/OpenCodeRemoteTests/          # ~162 test
-│   ├── ServerSessionE2ETests.swift     # E2E contro il MockServer (processo esterno)
-│   ├── StressModelsTests.swift, StressStoreTests.swift, StressStreamTests.swift  # NUOVI (untracked)
-│   ├── ProjectDecodingTests.swift      # NUOVO (untracked)
-│   ├── SessionEventStreamTests.swift, ServerSessionStoreTests.swift, … 
-│   └── TestUtilities.swift
+├── Tools/MockServer/main.swift         # Mock HTTP+SSE del server opencode
+├── Tests/OpenCodeRemoteTests/          # 181 test
+├── Docs/
+├── setup_assets.sh
 └── .opencode/memory/                   # session-summary.md + lessons.md (leggere!)
 ```
-
-**Target SPM** (`Package.swift`): `OpenCodeRemote` (libreria core),
-`OpenCodeRemoteApp` (app iOS), `OpenCodeWidgets` (CLI), `MockServer`
-(executable), `OpenCodeRemoteTests` (test). Dipendenze: `swift-tagged`,
-`swift-identified-collections`. Swift setting attivo:
-`-enable-actor-data-race-checks`.
-
-**XcodeGen (`project.yml`)**: framework iOS `io.opencode.remote.sdk` + app
-`io.opencode.remote`. **ATTENZIONE: `DEVELOPMENT_TEAM` è VUOTO** — per
-installare sull'iPhone va valorizzato (vedi P5).
 
 ---
 
@@ -104,265 +90,146 @@ Il server opencode espone DUE protocolli HTTP:
 | Base path | `/session/...`, `/project`, `/command` | `/api/session/...`, `/api/model`, `/api/event` |
 | Client | `V1OpenCodeAPIClient` (`APIClient.swift`) | `OpenCodeAPIClientV2` (actor) |
 | Lista messaggi | `GET /session/:id/message` → `[Message]` v1 | `GET /api/session/:id/message` → `{data, cursor}` |
-| Elimina sessione | `DELETE /session/:id` ✅ FUNZIONA | `DELETE /api/session/:id` ❌ 200 HTML |
-| Shell | `POST /session/:id/shell` (esiste) | `POST /api/session/:id/shell` ❌ 200 HTML |
-| Command | `POST /session/:id/command` (esiste) | `POST /api/session/:id/command` ❌ 200 HTML |
+| Elimina sessione | `DELETE /session/:id` ✅ | `DELETE /api/session/:id` ❌ 200 HTML |
+| Shell | `POST /session/:id/shell` ✅ (fix sessione 18) | `POST /api/session/:id/shell` ❌ 200 HTML |
+| Command | `POST /session/:id/command` ✅ (con slash-command reali) | `POST /api/session/:id/command` ❌ 200 HTML |
 | SSE | `GET /session/:id/event` | `GET /api/event` (globale) ✅ usato |
 | Prompt | `POST /session/:id/message` | `POST /api/session/:id/prompt` ✅ usato |
 
-**Fatto verificato sul server 1.18.14**: le rotte v2 `shell/command/delete`
-**NON esistono**: il server risponde **200 con HTML** (fallback SPA, la index
-del web app) invece di 404. Il client v2 oggi lo interpreta come "Decodifica
-fallita" (`ServerError.invalidResponse`).
-
 Il dispatch v1/v2 avviene in `CompatibleAPI` in base al probe di
-`ProtocolDetector` (esiste `/api/session`? → v2). **Il dominio v2 è la fonte
-di verità**; `SessionMessageMapperV2` adatta v1↔v2.
-
-Altre peculiarità wire note (NON riaprire senza motivo):
-- `time.*` in **millisecondi numerici** (decoder custom già fatto in v2).
-- Envelope `{data: ...}` in molte risposte v2 (già gestito con
-  `decodeLenient`).
-- `SessionInfoV2.model`: stringa nuda (mock) o oggetto `{id, providerID,
-  variant}` (wire reale) — già gestito.
-- Messaggi user: `text` top-level nel wire reale (già gestito).
+`ProtocolDetector`. **Il dominio v2 è la fonte primaria**; le rotte v1 sono il
+**fallback** per le funzioni mancanti nel server 1.18 (remove, shell, command).
+I fallback rilevano la risposta HTML della SPA (`HTMLFallbackError`) e ripetono
+la richiesta sulla rotta v1.
 
 ---
 
-## 4. Stato git corrente
+## 4. Stato del progetto
+
+**181/181 test verdi**, build iOS Simulator OK. **10 commit vecchi + fix
+sessione 18 NON ancora pushati** su `origin/main`. Il collegamento app →
+iPhone NON è ancora verificato dal vivo.
 
 ```
-f6300a1  docs(memory): sessione 13 — deploy iPhone, commit fix SSE, lezione
-2dcbe0d  fix(permissions): support real SSE event names without session. prefix
-e98c4e7  Initial commit: OpenCodeRemote iOS app
-(branch main, 2 commit avanti rispetto a origin/main — NON pushati)
+P1 [✅ COMMITTATO]       Fallback automatico v1 per remove/shell/command (commit 026f82c)
+P2 [✅ COMMITTATO]       Merge cronologia v1 nella prima pagina di sync (commit dfc455b)
+P3 [✅ COMMITTATO]       Mock rotte /project e /session/status (commit bd02f3b)
+P4 [✅ COMPLETATO]       Red Team su fix Chat v2
+P5 [IN CORSO ⚠️]        Collegamento app → iPhone (trust profilo + test live — vedi §7)
+P6 [✅ COMPLETATO]       Build iOS device + installazione su iPhone 14 Pro
+P7 [✅ COMPLETATO]       Wire shell v1 allineato al reale + test
+P8 [✅ COMPLETATO]       Wire command v1 allineato al reale + test
+P9 [✅ FATTO, DA PUSHARE] Fix sessione 18: Terminal + fallback shell/command wire reale
 ```
 
-**Modificato, NON committato** (work in corso della sessione 15):
-- `OpenCodeAPIClientV2.swift` — decoder date ms + `decodeLenient` envelope
-  `{data}` + campo `text` top-level (DA COMMITTARE, già testato)
-- `DTOV2.swift`, `Models.swift`, `SchemaV2.swift` — lenient decode + model
-  oggetto + testo user (testati)
-- `AppState.swift`, `SessionEventStream.swift`, `ServerSessionStore.swift`
-  — fetchPage con fallback messageList/history, mapper migliorato
-- `SessionEventStreamTests.swift`, `Tools/MockServer/main.swift`
-- **Untracked**: `StressModelsTests.swift`, `StressStoreTests.swift`,
-  `StressStreamTests.swift`, `ProjectDecodingTests.swift` (stress test 5
-  livelli, parte del lavoro da committare)
+## 5. Modifiche sessione 18 (da committare)
 
-**Regola**: prima di dichiarare finito, i fix P1-P3 vanno committati con
-commit atomici; `swift test` deve restare 162/162 (o più).
+1. **`V1OpenCodeAPIClient.executeShell`** (Terminal) — era rotto contro il
+   server reale per DUE motivi, entrambi fixati:
+   - body `{command, agentId, modelId}` → il server reale richiede `agent`
+     (400 `Missing key ["agent"]`); ora invia `{command, agent, model?}`
+     (agent di default `"build"`, mappato da `request.agentId`).
+   - risposta decodificata come `[String: String]` → il reale è
+     `{info, parts}` con l'output nel part `tool` → `state.output` TOP-level;
+     ora `performShell` gestisce sia `{output}` (legacy) sia `{info, parts}`
+     ed estrae il messaggio degli errori 400/500 da `data.message`.
+   - File: `Sources/OpenCodeRemote/Services/APIClient.swift`.
+2. **`TerminalView.sendCommand`** ora passa l'agente/modello della sessione
+   corrente a `executeShell`.
+   File: `Sources/OpenCodeRemoteApp/TerminalView.swift`.
+3. **Fallback v2 `shell`** — le parti reali stanno a livello TOP
+   (`{info, parts}`), NON dentro `info`; prima `info.parts` era sempre nil
+   → output sempre vuoto. Ora `V1ShellResponse.toolOutput` legge prima le
+   parti top-level, poi `info.parts` (legacy).
+4. **Fallback v2 `command`** — le parti reali (text/reasoning/step-*) stanno
+   a livello TOP; prima venivano perse → output sempre vuoto. Ora
+   `V1CommandResponse` decodifica `parts` top-level e li riattacca al
+   messaggio `info` prima del mapping v2.
+   File: `Sources/OpenCodeRemote/Services/OpenCodeAPIClientV2.swift`.
+5. **Test**: fixture fallback aggiornati al wire reale (parti top-level) +
+   nuovo `Tests/OpenCodeRemoteTests/V1ExecuteShellTests.swift` (5 test).
 
----
+## 6. Problemi noti e rischi
 
-## 5. PROBLEMI APERTI (definitivi)
+1. **[RISOLTO] Disallineamento wire shell/command v1** — i fixture dei test
+   non rispecchiavano il wire reale (`parts` dentro `info` invece che
+   top-level) e coprivano il bug silenziosamente. Corretto in sessione 18.
+2. **[RISOLTO — era una misdiagnosi] `command` v1 → 500 "su ogni payload"** —
+   `POST /session/:id/command` FUNZIONA (200 `{info, parts}`) con uno
+   slash-command reale (`init`) su sessione IDLE. Il 500 `UnknownError`
+   avviene solo per: (a) sessione OCCUPATA, (b) nome comando inesistente
+   (`echo`, `bash`: il server mappa "Command not found" su 500 invece che 400).
+3. **[APERTO] Test live app → iPhone** — device non collegato; serve la trust
+   del profilo di sviluppo (vedi §7).
+4. **`/api/project` (v2) assente** — risponde con la SPA HTML; il client ha il
+   fallback `GET /project` (funziona, verificato).
+5. **`/session/status` è un no-op** — risponde `{}` sul server reale; la UI
+   usa lo stato dal modello, nessun break funzionale.
+6. **[BASSO] `POST /api/session/:id/shell` e `command` (v2) assenti** — il
+   server risponde HTML; il fallback v1 è il percorso usato (ora corretto).
 
-### P1 — Fallback v1 per `remove`/`shell`/`command` nel client v2
+## 7. Collegamento app → iPhone
 
-**File**: `Sources/OpenCodeRemote/Services/OpenCodeAPIClientV2.swift`
-righe 471-484 (`remove`, `shell`, `command`).
+**Stato: TRUST PROFILO MANCANTE / device non collegato.** L'app è installata
+su iPhone 14 Pro ma la schermata di trust del profilo di sviluppo non è stata
+confermata, e il device non era collegato via USB durante la sessione 18.
 
-**Problema**: su server 1.18 le tre rotte v2 rispondono **200 + HTML**
-(SPA fallback). Il client v2 lancia `ServerError.invalidResponse`
-("Decodifica fallita"). Nessun fallback → shell/command inutilizzabili e
-delete via v2 rotto (l'app per fortuna usa già v1 per delete:
-`AppState` → `apiClient.deleteSession` in `SessionViews.swift:343`).
+Passi:
+1. Collegare l'iPhone via cavo (il Mac compare sull'interfaccia USB en19 con
+   un IP link-local 169.254.x.x — verificare `ipconfig getifaddr en19` e
+   `arp -a`). L'IP WiFi 192.168.1.133 NON è raggiungibile dal telefono.
+2. Trust profilo: Impostazioni → Generali → Gestione VPN e dispositivi →
+   "Fidati" del profilo di sviluppo.
+3. Nell'app collegarsi a `http://169.254.31.57:4096` (o l'IP en19 attuale).
+4. Verificare dal vivo: lista sessioni, apertura sessione vecchia (merge
+   cronologia v1+v2), invio messaggio (prompt v2 `{prompt:{text}}`), shell dal
+   Terminal (ora funzionante), cancellazione sessione (fallback v1 remove).
 
-**Comportamento atteso** (analisi sessione 15):
-1. Aggiungere rilevamento HTML body (prefisso `<!doctype html` / `<html`,
-   case-insensitive, su body con status 2xx) in `performOptional` e
-   `performNoContent` → throw marker distinguibile
-   (es. `ServerError` con message dedicato o enum privata).
-2. `remove(id:)`: catch del marker → retry `DELETE /session/:id` (v1).
-3. `shell(id:request:)`: catch → retry `POST /session/:id/shell` con
-   `ShellCommandRequest(command:)` (vedi `APIClient.swift:643-649`,
-   risposta v1 `{"output": "..."}`) → costruire `MessageV2DTO` minimale
-   (il runner legge `raw["output"]`/`raw["text"]`, vedi
-   `ShellCommandRunner.outputText` righe 214-230). Body v2 `SessionShellV2`
-   ha anche `agent`/`model`/`location`: il v1 accetta solo command
-   (mappare `agent` → `agentId`, `model` → `modelId` best-effort).
-4. `command(id:request:)`: catch → retry `POST /session/:id/command` (v1,
-   esiste nella spec: body `{messageID?, agent?, model?, command,
-   arguments}`, risposta `{info: Message, parts: [...]}`) → estrarre
-   `info` e decodificarlo come `MessageV2DTO` (best-effort; se il decode
-   fallisce, ritornare nil SENZA lanciare).
-5. Test unitari: mock URLProtocol (o MockServer) che risponde HTML 200 alla
-   prima chiamata e JSON alla v1 → verificare che il retry avvenga e il
-   risultato sia corretto. Non introdurre retry su errori di rete (solo
-   sul marker HTML).
+## 8. Come testare (mock + reale)
 
-**Rischio**: basso — `ShellCommandRunner` non è ancora cablato in UI
-(l'usa solo l'harness `OpenCodeWidgets/main.swift:505-511`).
+### Mock server (locale)
 
----
+- `Tools/MockServer/mock-server` (binario SPM) — rotte: `/health`,
+  `/api/health`, `/project`, `/session/status`, `/api/session/:id/message`,
+  `/api/session/:id/prompt`, ecc. Posizioni: `Tools/MockServer/main.swift`.
 
-### P2 — Cronologia sessioni legacy invisibili: merge v2+v1 in `fetchPage`
+### Server reale (attivo)
 
-**File**: `Sources/OpenCodeRemote/Store/ServerSessionStore.swift`
-righe 304-318 (`fetchPage`) e 250-300 (`sync`).
+- `opencode serve --port 4096 --hostname 0.0.0.0` (PID 10393).
 
-**Problema**: `GET /api/session/:id/message` e `/history` (v2) vedono
-SOLO i messaggi creati post-aggiornamento del server. I messaggi v1
-legacy (sessioni create prima) non compaiono → **le sessioni vecchie
-appaiono vuote**. Verificato LIVE sul server 1.18.14 con la sessione
-`ses_0276825a2ffe5NiyhESnxspyi1`: v2 → 1 messaggio, v1 → 21 messaggi
-(insiemi DISJOINT, nessun overlap di id).
+### Comandi di verifica curl (wire reale 1.18.15)
 
-**Comportamento atteso**:
-1. `fetchPage` deve fare merge dei due canali: fetch v2 (`messageList`,
-   già fatto) **più** fetch v1 `GET /session/:id/message`
-   (`V1OpenCodeAPIClient.getSessionMessages(_:)`,
-   `APIClient.swift:490` → `[Message]` dominio v1).
-2. Mapping v1 → v2 con `SessionMessageMapperV2.mapV1ToV2`
-   (`SessionMessageMapperV2.swift:15`, best-effort, ritorna `MessageV2?`).
-3. Dedup per `id` (v2 vince) + ordinamento per `time` crescente
-   (come fa già `sync` per i messaggi v2).
-4. Note:
-   - il client v2 (actor) non dipende dal client v1: serve iniettare
-     una dipendenza per il fetch v1 (es. `V1OpenCodeAPIClient` o un
-     closure/`Sendable` protocol) in `ServerSessionStore` (attualmente
-     ha solo `api: OpenCodeAPIClientV2`, riga 106) — oppure farlo
-     tramite `CompatibleAPI`. **Decidere con il pattern più semplice**
-     (KISS); i test esistenti `ServerSessionStoreTests` devono passare
-     invariati.
-   - La paginazione v1 non ha cursor: il merge va fatto per pagina
-     (nella prima pagina c'è tutto il v1; se il v2 ha più pagine, il
-     v1 va fuso solo con la prima pagina per evitare duplicati in
-     prepend). Documentare la scelta nel commento.
-   - La chiamata v1 può fallire (server senza v1 o con v1 in rotta?):
-     **best-effort** — in caso di errore v1, usare solo v2 (no throw).
-5. Test: aggiornare/aggiungere test in `ServerSessionStoreTests.swift`
-   con un client v1 finto che restituisce messaggi legacy e verificare
-   che compaiano, dedup e ordine corretto.
+- Sessione: `curl -s http://127.0.0.1:4096/api/session` (elenco)
+- Prompt v2: `curl -s -X POST http://127.0.0.1:4096/api/session/:id/prompt -d '{"prompt":{"text":"ciao"}}'`
+- Shell v1: `curl -s -X POST http://127.0.0.1:4096/session/:id/shell -d '{"command":"ls","agent":"orchestrator"}'`
+  (body: `agent` obbligatorio, `model` opzionale; risposta `{info, parts}`)
+- Command v1: `curl -s -X POST http://127.0.0.1:4096/session/:id/command -d '{"command":"init","arguments":""}'`
+  (su sessione IDLE con slash-command reale → 200; su sessione busy o nome
+  inesistente → 500 `UnknownError`)
+- Delete v1: `curl -s -X DELETE http://127.0.0.1:4096/session/:id`
 
----
+### Fixture wire reale (catturati con curl il 7 ago)
 
-### P3 — Gap del MockServer: `/project` e `/session/status`
+- **Shell response v1**: `{info: {...}, parts: [{type: "tool", tool: "bash", state: {status: "completed", input: {...}, output: "..."}}]}`
+- **Command response v1**: `{info: {...}, parts: [{type: "step-start"}, {type: "reasoning", text: "..."}, {type: "text", text: "..."}, {type: "step-finish"}]}`
+- **Errore 400/500**: `{"name": "BadRequest"|"UnknownError", "data": {"message": "...", "kind": "Payload"}}`
 
-**File**: `Tools/MockServer/main.swift` (router `route()` riga 356).
+## 9. Prossimi passi
 
-**Problema**: per un E2E completo (`ServerSessionE2ETests`) mancano:
-1. `GET /project` (v1, usato da `APIClient.listProjects`,
-   `APIClient.swift:358-360`) — il mock risponde 404.
-2. `GET /session/status` (v1, usato da `getSessionsStatus`,
-   `APIClient.swift:382-384`, atteso `[String: String]`) — il mock ha
-   una shape errata o manca.
+1. **Push**: 10 commit locali (fino a `dacba18`) + commit fix sessione 18 —
+   chiedere conferma. Poi eliminare branch `backup/session-15-wip` (già
+   mergiato).
+2. **Test collegamento app → iPhone** (vedi §7): device via USB, trust profilo,
+   collegamento a `http://169.254.31.57:4096`.
+3. **Verifica dal vivo** da iPhone: lista sessioni, apertura sessione vecchia
+   (merge), invio messaggio (prompt v2), shell dal Terminal, cancellazione
+   sessione.
+4. Aggiornare questa HANDOFF con gli esiti del test live.
 
-**Comportamento atteso**:
-1. `GET /project` → array nudo di `Project` v1 (`Models.swift`,
-   shape: `{id, path, title, ...}`; controllare il modello `Project`
-   in `Models.swift` prima di scrivere la fixture).
-2. `GET /session/status` → `[sessionID: "busy"/"idle"/...]` (dizionario
-   `[String: String]`), coerente con le sessioni registrate nel mock
-   (`registeredSessions`).
-3. Test E2E in `ServerSessionE2ETests.swift` per le due rotte.
+## 10. URL e risorse utili
 
----
-
-### P4 — Red Team finale sul diff completo
-
-Dopo P1-P3 e test verdi: revisione critica di TUTTO il diff non
-committato (Sessione 15): decoder date, `decodeLenient`, `SessionInfoV2`
-model oggetto, SSE (nomi eventi reali senza prefisso `session.`),
-`fetchPage`, stress test. Cercare: API inventate, edge case null/empty,
-data race, secret hardcoded, regressioni sui test esistenti.
-
----
-
-### P5 — Build iOS e installazione su iPhone (obiettivo finale)
-
-Stato: **iPhone fisicamente collegato al Mac** (per questo è servito il
-progetto Xcode). Server opencode su Mac eventualmente da rilanciare per
-il test live (192.168.1.133:4096, attualmente giù).
-
-1. **Signing**: `project.yml` ha `DEVELOPMENT_TEAM` vuoto (riga 11).
-   Impostare il team (es. `export DEVELOPMENT_TEAM=<id>` e rigenerare,
-   o compilare da Xcode scegliendo il team di sviluppatore Apple).
-2. `./setup_xcode_project.sh` → genera `OpenCodeRemote.xcodeproj`.
-3. Build + install: da Xcode (target `OpenCodeRemoteApp`, device) o
-   `xcodebuild -project OpenCodeRemote.xcodeproj -scheme OpenCodeRemoteApp
-   -destination 'platform=iOS,id=<device-udid>' build`.
-4. Test live sull'iPhone contro il server reale → aggiornare
-   `session-summary.md` con esito "LIVE-OK" → commit finale.
-
----
-
-## 6. Vincoli e trappole note (da `lessons.md`, non ripeterle)
-
-1. **`container.allKeys` non include chiavi fuori dai `CodingKeys`** —
-   per campi wire extra serve una proprietà esplicita, non il raw-dict.
-2. **`URLRequest.timeoutInterval` è idle, non connessione** — gli SSE
-   lunghi muoiono con timeout bassi (il server 1.18 non manda heartbeat
-   regolari). Non abbassare i timeout SSE.
-3. **Il server non invia mai `admitted`/`prompted`** — la conferma del
-   prompt arriva via `message.updated` con lo stesso id. Niente logica
-   che dipenda da admitted/prompted.
-4. **Mock: `performNoContent` decodifica comunque il body** — il mock
-   deve rispondere `{}` con 200; mai body vuoto/204 (vale per
-   ptyUpdate, interrupt, switchAgent, compact, wait, revert…).
-5. **Il decoder v2 usa date custom ms/ISO8601** — nel mock i `time`
-   devono essere stringhe ISO o numeri ms (il decode fallisce su
-   millisecondi in formato stringa).
-6. **Niente test SSE in parallelo contro la stessa sessione mock** —
-   gli id per-stream diventano alternati; i check di replay usano
-   tolleranza ±2.
-7. **Build parallele SwiftPM corrotte** — mai `swift build` concorrenti
-   sullo stesso package; se appare un errore in un file non toccato,
-   ripetere la build da sola.
-8. **`-enable-actor-data-race-checks` è attivo** — il codice deve essere
-   data-race free (actor/isolamento corretto).
-9. **Permessi opencode dei subagent**: pattern `"*.opencode/memory/*.md":
-   allow`, MAI `**/` come prefisso; `write` chiede permesso `edit`.
-10. **Il server 1.18 non serve `/api/project`**: i progetti si prendono
-    via v1 `/project` e `/project/current` (già gestito in AppState).
-
----
-
-## 7. Comandi utili
-
-```bash
-# Test (tutti i target, ~162 test)
-swift test
-
-# Test singolo file
-swift test --filter SessionEventStreamTests
-
-# Build library macOS (veloce, senza Xcode)
-swift build
-
-# Mock server (usato da ServerSessionE2ETests — controllare se i test
-# lo lanciano da soli o richiedono il processo; vedere TestUtilities.swift)
-swift run MockServer
-
-# Harness CLI
-swift run OpenCodeWidgets
-
-# Progetto Xcode per iPhone
-./setup_xcode_project.sh          # genera .xcodeproj (serve xcodegen)
-```
-
----
-
-## 8. Ambiente
-
-- macOS (darwin), zsh; Xcode con iOS 17 SDK; `xcodegen` installato.
-- iPhone collegato per P5 (si presume iOS 17+).
-- Server opencode: `http://192.168.1.133:4096`, versione 1.18.14.
-  Attualmente OFFLINE: per test live va rilanciato
-  (es. `opencode serve`/config dell'utente).
-- Path repo: `/Volumes/SanDisk Ultra/leo/progetti leo/opencode remote`
-  (NB: spazi nel path — quotare sempre).
-- Altri doc rilevanti: `ARCHITETTURA_CORE.md`, `PIANO_IMPLEMENTAZIONE_IOS.md`,
-  `.opencode/memory/session-summary.md`, `.opencode/memory/lessons.md`.
-
----
-
-## 9. Ordine di lavoro consigliato
-
-1. **P1** (fallback v1 client) + test
-2. **P2** (merge cronologia) + test
-3. **P3** (mock /project, /session/status) + test E2E
-4. `swift test` completo verde; commit atomici (1 per problema)
-5. **P4** Red team del diff (anche con agente code-reviewer)
-6. **P5** build iOS + install iPhone → verifica live → commit finale
-7. Aggiornare `.opencode/memory/session-summary.md` e `lessons.md`
+- Server: `http://192.168.1.133:4096` (WiFi Mac), `http://169.254.31.57:4096`
+  (USB link-local)
+- Sorgente web opencode: https://github.com/anomalyco/opencode (branch `main`)
+- Memoria: `.opencode/memory/lessons.md` (lezioni per sessione, in ordine
+  cronologico inverso), `.opencode/memory/session-summary.md` (stato attuale)
