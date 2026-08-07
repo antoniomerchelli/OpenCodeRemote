@@ -288,6 +288,60 @@ final class MockServer {
         ]
     }
 
+    /// Progetti per GET /project (wire v1 di `V1OpenCodeAPIClient.listProjects`).
+    /// `Project` usa Codable sintetizzato → chiavi esatte `id/name/path/
+    /// isCurrent/vcsStatus/lastAccessed` (NON `worktree`/`time`). `lastAccessed`
+    /// è una Date decodificata con .iso8601 (stringa, non epoch ms). `VCSStatus`
+    /// ha tutti i campi obbligatori: `branch`, `hasUncommittedChanges`, `ahead`,
+    /// `behind`, `status` (NON `currentBranch`).
+    func projectsJSON() -> [[String: Any]] {
+        let iso = ISO8601DateFormatter().string(from: Date())
+        let olderIso = ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: -86_400))
+        return [
+            [
+                "id": "proj-1",
+                "name": "MyApp",
+                "path": "/Users/test/MyApp",
+                "isCurrent": true,
+                "vcsStatus": [
+                    "branch": "main",
+                    "hasUncommittedChanges": false,
+                    "ahead": 0,
+                    "behind": 0,
+                    "status": "clean",
+                ],
+                "lastAccessed": iso,
+            ],
+            [
+                "id": "proj-2",
+                "name": "OpenCodeRemote",
+                "path": "/Users/test/OpenCodeRemote",
+                "isCurrent": false,
+                "vcsStatus": [
+                    "branch": "develop",
+                    "hasUncommittedChanges": true,
+                    "ahead": 2,
+                    "behind": 1,
+                    "status": "dirty",
+                ],
+                "lastAccessed": olderIso,
+            ],
+        ]
+    }
+
+    /// Status sessioni per GET /session/status (`V1OpenCodeAPIClient
+    /// .getSessionsStatus` decodifica `[String: String]` e tiene solo i valori
+    /// che sono `SessionStatus` validi). Se ci sono sessioni registrate via
+    /// POST /api/session, risponde con quelle; altrimenti due sessioni fisse.
+    func sessionsStatusJSON() -> [String: Any] {
+        if !registeredSessions.isEmpty {
+            var result: [String: Any] = [:]
+            for id in registeredSessions { result[id] = "idle" }
+            return result
+        }
+        return ["sess-1": "idle", "sess-2": "executingTool"]
+    }
+
     func modelsJSON() -> [[String: Any]] {
         [
             [
@@ -367,6 +421,15 @@ final class MockServer {
         case ("POST", ["session"]):
             let id = nextSessionID()
             connection.respondJSON(status: 201, object: v1SessionJSON(id: id, title: "New Session")); return
+        case ("GET", ["project"]):
+            // Il client (V1OpenCodeAPIClient.listProjects) decodifica [Project]
+            // nudo: niente wrapper {data: ...}.
+            connection.respondJSON(status: 200, jsonArray: projectsJSON()); return
+        case ("GET", ["session", "status"]):
+            // V1OpenCodeAPIClient.getSessionsStatus decodifica un oggetto
+            // {id: status}. Prima di questa rotta /session/status cadeva nel
+            // match parametrico /session/:id (session "status").
+            connection.respondJSON(status: 200, object: sessionsStatusJSON()); return
         case ("GET", ["api", "session"]):
             // Il client (OpenCodeAPIClientV2.list) decodifica SessionListV2 che
             // accetta array nudo O `{"sessions":[...]}`/`{"items":[...]}` ma NON
