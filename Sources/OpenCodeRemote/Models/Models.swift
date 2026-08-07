@@ -357,6 +357,80 @@ public struct Agent: Identifiable, Equatable, Hashable, Codable, Sendable {
         self.isHidden = isHidden
         self.systemPrompt = systemPrompt
     }
+
+    /// Wire reale server 1.18 (`GET /agent`): ogni agente ha `{ name,
+    /// description, mode, native, permission: [regole], options: {} }` —
+    /// NON esiste la chiave `id` (l'identità è `name`) e molti campi della
+    /// struct sono assenti. Questo decoder leniente assegna i default.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
+        id = (try? container.decodeIfPresent(AgentID.self, forKey: .id)) ?? AgentID(rawValue: name)
+        mode = (try? container.decodeIfPresent(AgentMode.self, forKey: .mode)) ?? .primary
+        color = (try? container.decodeIfPresent(String.self, forKey: .color)) ?? ""
+        modelId = (try? container.decodeIfPresent(ModelID.self, forKey: .modelId))
+        temperature = (try? container.decodeIfPresent(Double.self, forKey: .temperature))
+        topP = (try? container.decodeIfPresent(Double.self, forKey: .topP))
+        maxSteps = (try? container.decodeIfPresent(Int.self, forKey: .maxSteps))
+        canInvoke = (try? container.decodeIfPresent([AgentID].self, forKey: .canInvoke)) ?? []
+        isHidden = (try? container.decodeIfPresent(Bool.self, forKey: .isHidden)) ?? false
+        systemPrompt = try container.decodeIfPresent(String.self, forKey: .systemPrompt)
+        // Il wire invia `permission` come array di regole `{permission, pattern,
+        // action}`; la struct usa `permissions` (set allow/ask/deny).
+        permissions = (try? container.decodeIfPresent(AgentPermissions.self, forKey: .permissions))
+            ?? Self.decodePermissions(from: container)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(description, forKey: .description)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(color, forKey: .color)
+        try container.encodeIfPresent(modelId, forKey: .modelId)
+        try container.encodeIfPresent(temperature, forKey: .temperature)
+        try container.encodeIfPresent(topP, forKey: .topP)
+        try container.encodeIfPresent(maxSteps, forKey: .maxSteps)
+        try container.encode(permissions, forKey: .permissions)
+        try container.encode(canInvoke, forKey: .canInvoke)
+        try container.encode(isHidden, forKey: .isHidden)
+        try container.encodeIfPresent(systemPrompt, forKey: .systemPrompt)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, description, mode, color, modelId, temperature, topP
+        case maxSteps, permissions, canInvoke, isHidden, systemPrompt
+        case permissionWire = "permission"
+    }
+
+    private struct PermissionRule: Decodable {
+        let permission: String?
+        let pattern: String?
+        let action: String?
+    }
+
+    private static func decodePermissions(
+        from container: KeyedDecodingContainer<CodingKeys>
+    ) -> AgentPermissions {
+        guard let rules = try? container.decodeIfPresent([PermissionRule].self, forKey: .permissionWire) else {
+            return AgentPermissions()
+        }
+        var allow: Set<String> = []
+        var ask: Set<String> = []
+        var deny: Set<String> = []
+        for rule in rules {
+            guard let action = rule.action, let permission = rule.permission else { continue }
+            switch action {
+            case "allow": allow.insert(permission)
+            case "ask": ask.insert(permission)
+            case "deny": deny.insert(permission)
+            default: break
+            }
+        }
+        return AgentPermissions(allow: allow, ask: ask, deny: deny)
+    }
 }
 
 public enum AgentMode: String, Codable, Sendable, Equatable, Hashable {
