@@ -1,5 +1,15 @@
 # OpenCode Remote — Lezioni apprese
 
+## Sessione 16 (7 Ago 2026) — F1-F3: fallback v1, merge cronologia, mock /project (piano "risoluzione problemi")
+
+1. **`catch HTMLFallbackError` (senza pattern) NON compila per enum con associated value**: per un enum `case htmlResponse(statusCode: Int)` il pattern match richiede `catch let error as HTMLFallbackError` (o `catch is HTMLFallbackError` se la variabile non serve). Scritto anche nel prompt agente, l'agente F1 lo ha riprodotto → verificare sempre con `swift build` dopo la delega.
+2. **`URLSession` converte `httpBody` in `httpBodyStream` quando la richiesta attraversa il protocol stack**: un `URLProtocol` (mock) che vuole leggere il body riceve `request.httpBody == nil` e deve leggere da `httpBodyStream`. → Nei mock: helper `readBodyStream(from:)` che apre lo stream e accumula i byte; il DTO di produzione era CORRETTO, il test leggeva il body sbagliato.
+3. **Round-trip Codable dominio→DTO fallisce quando i tipi di `time` divergono**: `MessageV2.time` è `TimeInterval` (secondi, encode come numero) ma `MessageV2DTO.time` è `PartTimeV2` (oggetto). Il decode rigoroso fallisce e la strategia `.custom` su `Date` non aiuta. → Serve il parsing leniente stile `messageDTO(from:)` (encode → `JSONSerialization` → `JSONValue.from` → costruzione manuale del DTO con `raw`).
+4. **`MessageV2.encode` è asimmetrico per ruolo**: per `.user` scrive `text`/`parts` a livello TOP (nessuna chiave `content`); per `.assistant` sotto `content`. → Nel parsing leniente `content: obj["content"] ?? obj["text"]` per non perdere il testo dei messaggi user legacy (trovato dal Red Team: i test con soli assistant non coprono il caso).
+5. **`MessageV2.time` è in SECONDI dall'epoch (TimeInterval)**: NON moltiplicare per 1000 quando si converte in `PartTimeV2.created` (`Date(timeIntervalSince1970:)` attende secondi) — un `* 1_000` sposta i messaggi legacy nell'anno ~57.000 (ordinamento/display rotti, trovato dal Red Team).
+6. **`SessionStatus` v1 non include `"working"`**: rawValues validi: idle, thinking, executingTool, waitingForPermission, waitingForQuestion, error, completed, aborted. Il decoder v1 scarta i valori sconosciuti (chiave → nil). → Nei fixture mock usare valori validi (`executingTool`).
+7. **Merge `messageList`/`historyPage`**: il wire reale del server 1.18 usa `GET /api/session/:id/message` (`{data, cursor}` con `cursor.prev`); il mock/fallback usa `/history`. Combinare: provare `messageList`, in catch `historyPage` (doppio fallback nel `fetchPage` di istanza).
+
 ## Sessione 15 (6 Ago 2026) — Wire reale: testo user + timeout SSE
 
 1. **`container.allKeys` su `KeyedDecodingContainer` NON include le chiavi fuori dai `CodingKeys` dichiarati**: il pattern "decodifica tutte le chiavi in un raw dict" (`for key in container.allKeys`) restituisce SOLO le chiavi presenti nei `CodingKeys` dell'enum → campi wire extra (es. `text` top-level dei messaggi user) NON finiscono mai nel raw-dict. → Per campi wire extra serve una **proprietà esplicita** nel DTO con la sua `CodingKey`, non il raw-dict. (Verificato con test isolato: `raw keys=["id","time","type"]`, `text` mancante.)
