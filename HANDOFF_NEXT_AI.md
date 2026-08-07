@@ -19,7 +19,7 @@ Il repo è un **Swift Package** (`Package.swift`) con XcodeGen
 (richiede `xcodegen`).
 
 Stato: **185/185 test verdi** (`swift test`, ~3.5s su macOS), build iOS
-Simulator OK. **Test definitivo LiveE2E 12/12** contro il server reale
+Simulator OK. **Test definitivo LiveE2E 13/13** contro il server reale
 (ha scoperto e corretto 3 bug wire — vedi §5b). Server reale analizzato:
 **opencode 1.18.15** (attivo, PID 10393,
 `opencode serve --port 4096 --hostname 0.0.0.0`).
@@ -109,7 +109,7 @@ la richiesta sulla rotta v1.
 ## 4. Stato del progetto
 
 **185/185 test verdi**, build iOS Simulator OK. **Tutto committato e pushato
-su `origin/main`** (sessioni 18 + 19). **Test definitivo LiveE2E 12/12** contro
+su `origin/main`** (sessioni 18 + 19). **Test definitivo LiveE2E 13/13** contro
 il server reale. Il collegamento app → iPhone NON è ancora verificato dal vivo.
 
 ```
@@ -122,7 +122,7 @@ P6 [✅ COMPLETATO]       Build iOS device + installazione su iPhone 14 Pro
 P7 [✅ COMPLETATO]       Wire shell v1 allineato al reale + test
 P8 [✅ COMPLETATO]       Wire command v1 allineato al reale + test
 P9 [✅ COMMITTATO+PUSHATO] Fix sessione 18: Terminal + fallback shell/command wire reale
-P10 [✅ COMPLETATO]      Test definitivo LiveE2E 12/12 + 3 bug wire corretti (sessione 19)
+P10 [✅ COMPLETATO]      Test definitivo LiveE2E 13/13 + 3 bug wire corretti (sessione 19)
 ```
 
 ## 5. Modifiche sessione 18 (COMMITTATE E PUSHATE — commit 8338e19, 7f3ca02, 16518c0)
@@ -156,10 +156,12 @@ P10 [✅ COMPLETATO]      Test definitivo LiveE2E 12/12 + 3 bug wire corretti (s
 
 **Harness `Tools/LiveE2E`** (target eseguibile in `Package.swift`): usa le
 STESSE classi dell'app contro il server reale. `swift run LiveE2E --host
-127.0.0.1 --port 4096` → **12/12 check verdi**, exit 0. Check: health,
+127.0.0.1 --port 4096` → **13/13 check verdi**, exit 0. Check: health,
 protocol detect, session list, project v1, agents v1, models v2, create
 session, shell v1 (Terminal), command v1 fallback, prompt v2 + SSE live,
-delete fallback, cleanup sessioni test (`--keep-sessions` per debug).
+delete fallback, **multi-agente** (sessioni/prompt/shell con agenti reali
+diversi da build: 8/8 sessioni con agent corretto, 2/2 prompt, shell con
+agent non-build ok), cleanup sessioni test (`--keep-sessions` per debug).
 
 Ha scoperto **3 bug wire reali**, tutti corretti:
 1. **`GET /agent` (v1) non ha `id`** — identità = `name`, permessi come array
@@ -242,7 +244,7 @@ Passi:
 
 ### Test definitivo LiveE2E (reale)
 
-- `swift run LiveE2E --host 127.0.0.1 --port 4096` → 12/12 check, exit 0.
+- `swift run LiveE2E --host 127.0.0.1 --port 4096` → 13/13 check, exit 0.
   Usa le classi dell'app contro il server reale. Flag: `--keep-sessions`
   (non eliminare le sessioni di test), exit ≠ 0 se qualche check fallisce.
 

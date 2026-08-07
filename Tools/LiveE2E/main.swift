@@ -7,6 +7,9 @@
 //   CONNESSIONE  → health (v1), rilevamento protocollo (v2), sessioni, progetto
 //   LOGICA       → fallback v2→v1 (project, delete, command), mapping v1→v2
 //   PARTI REALI  → prompt v2 con SSE live, shell v1 (Terminal), command v1
+//   MULTI-AGENTE → sessioni/prompt/shell con agenti REALI diversi da build
+//
+// Esito attuale sul server 1.18.15: 13/13 check verdi (exit 0).
 //
 // Usage:
 //   swift run LiveE2E [--host 127.0.0.1] [--port 4096] [--keep-sessions]
@@ -348,6 +351,92 @@ if let sid = commandSessionID {
     } catch {
         check.fail("delete session (fallback v2→v1)", "\(error)")
     }
+}
+
+// 12. MULTI-AGENTE — tutti i livelli con agenti REALI diversi da build:
+//   (a) usa la lista agenti v1 reale (max 8, non-hidden);
+//   (b) crea una sessione per agente e verifica che `agent` sia riflesso;
+//   (c) prompt v2 leggero su ≥2 agenti non-build (accettazione);
+//   (d) shell v1 con agent ESPLICITO non-build → output atteso.
+do {
+    let agents = try await withTimeout(20) { try await v1.listAgents() }
+        .filter { !$0.isHidden && $0.mode != .system }
+        .prefix(8)
+    guard !agents.isEmpty else {
+        check.fail("multi-agent", "lista agenti vuota")
+        throw TimeoutError(seconds: 1) // esce dal do senza far esplodere il catch sotto
+    }
+
+    var created = 0
+    var createdWithAgent = 0
+    var createFailures: [String] = []
+    var sessionsByAgent: [String: String] = [:] // agent → sessionID
+    for agent in agents {
+        let name = agent.name
+        do {
+            let session = try await withTimeout(20) {
+                try await compatible.createSession(server: server, request: SessionCreateV2(agent: name))
+            }
+            createdSessionIDs.append(session.id)
+            sessionsByAgent[name] = session.id
+            created += 1
+            if session.agent == name { createdWithAgent += 1 } else {
+                createFailures.append("\(name)→agent=\(session.agent ?? "nil")")
+            }
+        } catch {
+            createFailures.append("\(name)→\(error)")
+        }
+    }
+
+    // (c) prompt leggero su agenti non-build (max 2)
+    let promptCandidates = Array(sessionsByAgent.keys).filter { $0 != "build" }.prefix(2)
+    var promptsOK = 0
+    for name in promptCandidates {
+        guard let sid = sessionsByAgent[name] else { continue }
+        do {
+            let dto = try await withTimeout(30) {
+                try await compatible.prompt(server: server, sessionID: sid,                 request: SessionPromptV2(id: "multi-\(ts)-\(name)", prompt: "Rispondi solo OK"))
+            }
+            if dto != nil { promptsOK += 1 }
+        } catch {
+            createFailures.append("prompt(\(name))→\(error)")
+        }
+    }
+
+    // (d) shell con agent ESPLICITO non-build (se disponibile)
+    var shellOK = false
+    var shellAgent = ""
+    if let name = Array(sessionsByAgent.keys).first(where: { $0 != "build" }),
+       let sid = sessionsByAgent[name] {
+        shellAgent = name
+        do {
+            let output = try await withTimeout(30) {
+                try await v1.executeShell(SessionID(rawValue: sid), request: ShellCommandRequest(command: "echo multi-\(ts)", agentId: AgentID(rawValue: name)))
+            }
+            shellOK = output.contains("multi-\(ts)")
+        } catch {
+            createFailures.append("shell(\(name))→\(error)")
+        }
+    }
+
+    var detail = "sessioni \(created)/\(agents.count), agent corretto \(createdWithAgent)/\(created)"
+    if !promptCandidates.isEmpty { detail += ", prompt \(promptsOK)/\(promptCandidates.count)" }
+    if shellAgent.isEmpty { detail += ", shell non-build: n/d" } else {
+        detail += ", shell(\(shellAgent)): \(shellOK ? "ok" : "KO")"
+    }
+    if !createFailures.isEmpty { detail += " — problemi: \(createFailures.joined(separator: "; "))" }
+
+    let ok = created == createdWithAgent && created > 0
+        && (promptCandidates.isEmpty || promptsOK == promptCandidates.count)
+        && (shellAgent.isEmpty || shellOK)
+        && createFailures.isEmpty
+    if ok {
+        check.pass("multi-agent (\(agents.count) agenti reali)", detail)
+    } else {
+        check.fail("multi-agent (\(agents.count) agenti reali)", detail)
+    }
+} catch {
+    check.fail("multi-agent", "\(error)")
 }
 
 // Pulizia: rimuove le sessioni di test create (tranne quelle già eliminate).

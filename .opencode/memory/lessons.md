@@ -9,6 +9,7 @@
 5. **Con l'LLM reale configurato il turno `/init` COMPLETA** (DTO `msg_*` restituito, SSE: `server.connected` + eventi): i primi run fallivano/timeout perché il modello non rispondeva (nessun evento SSE, solo `server.connected`); in un run successivo ha risposto. Non dedurre "LLM rotto" da un singolo run.
 6. **Le `let` di un `actor` sono actor-isolated**: accedere a `compatible.v1` / `compatible.v2` (let pubblici di `CompatibleAPI` actor) dall'esterno è warning Swift 5 / errore Swift 6. Nell'harness: creare `V1OpenCodeAPIClient()` e `OpenCodeAPIClientV2()` direttamente (come fa `AppState`), non attraverso l'actor.
 7. **`for await` su un `AsyncThrowingStream` richiede `for try await`**: il compilatore segnala "call can throw, but the error is not handled" sul loop SSE.
+8. **Verifica multi-agente sul server reale (13/13 LiveE2E)**: `POST /api/session` con body `{"agent": "<nome>"}` crea una sessione il cui `SessionV2Info.agent` riflette l'agente (8/8 su build, orchestrator, code-reviewer, plan, general, explore, compaction, …); il prompt v2 accettato (200, id restituito) su sessioni di agenti non-build; `executeShell` con `agentId` NON-build (es. `compaction`) funziona e rispetta l'agente nel body. → Il dispatch per-agente dell'app (creazione sessione con agente, prompt, shell) è verificato end-to-end contro il wire reale, non solo contro il mock.
 
 ## Sessione 18 (7 Ago 2026) — Fix wire reali Terminal + fallback shell/command
 

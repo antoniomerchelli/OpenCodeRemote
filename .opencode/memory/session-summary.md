@@ -1,10 +1,10 @@
 # Session Summary — OpenCode Remote
 
 ## Stato attuale
-Piano "risoluzione problemi" completato. **Sessione 19**: test definitivo LiveE2E contro il server reale 1.18.15 (**12/12 check verdi**) — ha scoperto e corretto **3 bug reali** (Agent v1 senza `id`, ModelV2 `cost` array, command `arguments` mancante) + **185/185 test verdi** (`swift test`), build OK. **Sessione 18** (fix wire Terminal/fallback) pushatta. **Collegamento app → iPhone NON ancora completato** (device non connesso).
+Piano "risoluzione problemi" completato. **Sessione 19**: test definitivo LiveE2E contro il server reale 1.18.15 (**13/13 check verdi**) — ha scoperto e corretto **3 bug reali** (Agent v1 senza `id`, ModelV2 `cost` array, command `arguments` mancante) + **185/185 test verdi** (`swift test`), build OK. **Sessione 18** (fix wire Terminal/fallback) pushatta. **Collegamento app → iPhone NON ancora completato** (device non connesso).
 
-## Sessione 19 — Test definitivo LiveE2E (12/12)
-**Nuovo harness `Tools/LiveE2E`** (target eseguibile in `Package.swift`, `swift run LiveE2E --host 127.0.0.1 --port 4096`): usa le STESSE classi dell'app (CompatibleAPI, client v1/v2, SessionEventStream) contro il server reale. Check: health, protocol detect, session list (100), project v1 (2), agents v1 (13), models v2 (409), create session, shell v1 (Terminal, output reale), command v1 fallback (`/init` → DTO `msg_*`), prompt v2 + SSE live, delete fallback, cleanup sessioni test (flag `--keep-sessions` per il debug). Exit 0 = tutto verde.
+## Sessione 19 — Test definitivo LiveE2E (13/13, multi-agente)
+**Nuovo harness `Tools/LiveE2E`** (target eseguibile in `Package.swift`, `swift run LiveE2E --host 127.0.0.1 --port 4096`): usa le STESSE classi dell'app (CompatibleAPI, client v1/v2, SessionEventStream) contro il server reale. **13/13 check verdi, exit 0**: health, protocol detect, session list (100), project v1 (2), agents v1 (13), models v2 (409), create session, shell v1 (Terminal, output reale), command v1 fallback (`/init` → DTO `msg_*`), prompt v2 + SSE live, delete fallback, **multi-agente** (8 agenti reali: sessioni 8/8 con `agent` corretto riflesso, prompt 2/2 su agenti non-build, shell con agent esplicito non-build `compaction` ok), cleanup sessioni test (flag `--keep-sessions` per il debug). Exit 0 = tutto verde.
 
 ### Bug scoperti e corretti (commit: 27ace74, 31fe951, d84f449)
 1. **`GET /agent` (v1) non ha `id`**: identità = `name`, permessi come array di regole, campi assenti → `Agent.init(from:)` leniente (id→name, default, mapping `permission`→allow/ask/deny) + `encode(to:)` esplicito.
