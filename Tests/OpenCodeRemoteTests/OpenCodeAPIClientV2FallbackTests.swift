@@ -141,7 +141,10 @@ final class OpenCodeAPIClientV2FallbackTests: XCTestCase {
     func testShellFallsBackToV1Route() async throws {
         let responder = ScriptedResponder()
         responder.enqueue(htmlBody, for: "/api/session/ses_123/shell")
-        responder.enqueue(#"{"output": "fallback output"}"#, for: "/session/ses_123/shell")
+        responder.enqueue(
+            #"{"info": {"id": "msg_shell1", "parts": [{"type": "tool", "tool": "bash", "state": {"status": "completed", "output": "fallback output"}}]}}"#,
+            for: "/session/ses_123/shell"
+        )
         responder.install()
 
         let client = await makeClient(server: .testConnection())
@@ -154,7 +157,7 @@ final class OpenCodeAPIClientV2FallbackTests: XCTestCase {
         let dto = try await client.shell(id: "ses_123", request: request)
 
         XCTAssertEqual(dto?.raw["output"]?.stringValue, "fallback output")
-        XCTAssertNotNil(dto?.id, "Il DTO deve avere un id (shell-<uuid>)")
+        XCTAssertEqual(dto?.id, "msg_shell1", "Il DTO deve riportare l'id del server")
 
         let requests = responder.allRequests()
         XCTAssertEqual(requests.count, 2)
@@ -162,6 +165,14 @@ final class OpenCodeAPIClientV2FallbackTests: XCTestCase {
         let body = bodyDictionary(from: requests[0])
         XCTAssertEqual(body?["command"] as? String, "echo fallback")
         XCTAssertEqual(responder.requestCount(on: "/session/ses_123/shell"), 1)
+
+        // Wire reale v1: `agent` + `model` OGGETTO (non agentId/modelId).
+        let v1Body = bodyDictionary(from: requests[1])
+        XCTAssertEqual(v1Body?["agent"] as? String, "general")
+        XCTAssertNil(v1Body?["agentId"], "Il wire reale non accetta agentId")
+        let model = v1Body?["model"] as? [String: Any]
+        XCTAssertEqual(model?["providerID"] as? String, "anthropic")
+        XCTAssertEqual(model?["modelID"] as? String, "claude-3")
     }
 
     /// `command` con rotta v2 assente: il DTO deriva dal messaggio v1
@@ -185,6 +196,8 @@ final class OpenCodeAPIClientV2FallbackTests: XCTestCase {
         XCTAssertEqual(requests[0].url?.path, "/api/session/ses_123/command")
         let v1Body = bodyDictionary(from: requests[1])
         XCTAssertEqual(v1Body?["command"] as? String, "status")
+        // Wire reale v1: `arguments` è una STRINGA (il server rifiuta array).
+        XCTAssertEqual(v1Body?["arguments"] as? String, "--all", "arguments deve essere stringa (joined)")
         XCTAssertEqual(responder.requestCount(on: "/session/ses_123/command"), 1)
     }
 

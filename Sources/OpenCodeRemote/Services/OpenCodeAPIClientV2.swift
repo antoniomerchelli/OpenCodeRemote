@@ -26,24 +26,47 @@ private enum HTMLFallbackError: Error {
 // MARK: - Body/risposte v1 per il fallback (F1)
 
 /// Body v1 di `POST /session/:id/shell` (fallback quando la rotta v2 manca).
+/// Wire reale server 1.18: `{ command, agent, model: {providerID, modelID} }`
+/// — NON `agentId`/`modelId` (400 `Missing key ["agent"]`).
 private struct V1ShellBody: Encodable, Equatable, Hashable, Sendable {
     let command: String
-    let agentId: String?
-    let modelId: String?
+    let agent: String?
+    let model: ModelRefV2?
 }
 
-/// Risposta v1 di `POST /session/:id/shell`.
+/// Risposta v1 di `POST /session/:id/shell`: `{ info: Message, parts: [...] }`.
+/// L'output del comando sta nel part `tool` → `state.output` (non in `{output}`).
 private struct V1ShellResponse: Decodable, Equatable, Hashable, Sendable {
-    let output: String
+    let info: V1ShellInfo?
+
+    /// `info` del messaggio assistant creato dal server.
+    struct V1ShellInfo: Decodable, Equatable, Hashable, Sendable {
+        let id: String?
+        let parts: [V1ShellPart]?
+    }
+
+    /// Part del messaggio (solo i campi che servono all'output).
+    struct V1ShellPart: Decodable, Equatable, Hashable, Sendable {
+        let type: String?
+        let state: V1ShellState?
+    }
+
+    /// Stato del part `tool`: contiene l'output del comando.
+    struct V1ShellState: Decodable, Equatable, Hashable, Sendable {
+        let output: String?
+    }
 }
 
 /// Body v1 di `POST /session/:id/command` (fallback quando la rotta v2 manca).
+/// Wire reale server 1.18: `{ messageID, agent, model: string|null, command,
+/// arguments: string|null }` — `arguments` è una STRINGA (il server rifiuta
+/// array con `Expected string`).
 private struct V1CommandBody: Encodable, Equatable, Hashable, Sendable {
     let messageID: String?
     let agent: String?
     let model: String?
     let command: String
-    let arguments: [String]?
+    let arguments: String?
 }
 
 /// Risposta v1 di `POST /session/:id/command`: `{ info: Message }`.
@@ -533,8 +556,9 @@ public actor OpenCodeAPIClientV2 {
     }
 
     /// `POST /api/session/:id/shell` — esegue un comando shell.
-    /// Fallback v1 `POST /session/:id/shell` (da cui si ricostruisce un
-    /// `MessageV2DTO` con `raw["output"]`, leggibile da `ShellCommandRunner`).
+    /// Fallback v1 `POST /session/:id/shell` (wire reale: `{info, parts}` con
+    /// l'output nel part `tool` → `state.output`; ricostruito in `MessageV2DTO`
+    /// con `raw["output"]`, leggibile da `ShellCommandRunner`).
     public func shell(id: String, request: SessionShellV2, timeout: TimeInterval? = nil) async throws -> MessageV2DTO? {
         let turnTimeout = timeout ?? Self.turnTimeout
         do {
@@ -542,12 +566,18 @@ public actor OpenCodeAPIClientV2 {
         } catch is HTMLFallbackError {
             let body = V1ShellBody(
                 command: request.command,
-                agentId: request.agent,
-                modelId: request.model?.modelID
+                agent: request.agent,
+                model: request.model
             )
             let response: V1ShellResponse? = try await performOptional("POST", path: "/session/\(id)/shell", body: body, timeout: turnTimeout)
-            guard let response else { return nil }
-            return MessageV2DTO(id: "shell-\(UUID().uuidString)", raw: ["output": .string(response.output)])
+            guard let info = response?.info else { return nil }
+            let output = info.parts?
+                .first(where: { $0.type == "tool" })?
+                .state?.output ?? ""
+            return MessageV2DTO(
+                id: info.id ?? "shell-\(UUID().uuidString)",
+                raw: ["output": .string(output)]
+            )
         }
     }
 
@@ -564,7 +594,7 @@ public actor OpenCodeAPIClientV2 {
                 agent: request.agent,
                 model: request.model?.modelID,
                 command: request.command,
-                arguments: request.arguments
+                arguments: request.arguments?.joined(separator: " ")
             )
             let response: V1CommandResponse? = try await performOptional("POST", path: "/session/\(id)/command", body: body, timeout: turnTimeout)
             guard let info = response?.info,
