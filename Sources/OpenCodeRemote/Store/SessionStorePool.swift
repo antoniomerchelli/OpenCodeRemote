@@ -13,15 +13,21 @@ public actor SessionStorePool {
         var refCount: Int
     }
 
-    /// Client API condiviso da tutti gli store del pool.
+    /// Client API v2 condiviso da tutti gli store del pool.
     /// Va configurato una sola volta (`setServer(_:)`) prima di creare store
     /// che fanno fetch di rete.
     public let api: OpenCodeAPIClientV2
 
+    /// Client API v1 opzionale passato a ogni store creato: abilita il merge
+    /// della cronologia legacy (`GET /session/:id/message`) per server opencode
+    /// ≤ 1.18 che non espongono le rotte v2 della cronologia.
+    public let v1Api: V1OpenCodeAPIClient?
+
     private var entries: [String: Entry] = [:]
 
-    public init() {
+    public init(v1Api: V1OpenCodeAPIClient? = nil) {
         self.api = OpenCodeAPIClientV2()
+        self.v1Api = v1Api
     }
 
     /// Crea (o riacquista) lo store della sessione, incrementando il ref-count.
@@ -32,7 +38,7 @@ public actor SessionStorePool {
             entries[sessionID] = entry
             return entry.store
         }
-        let store = ServerSessionStore(sessionID: sessionID, api: api)
+        let store = ServerSessionStore(sessionID: sessionID, api: api, v1Api: v1Api)
         entries[sessionID] = Entry(store: store, refCount: 1)
         return store
     }

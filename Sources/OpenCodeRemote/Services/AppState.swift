@@ -132,7 +132,7 @@ public final class AppState: Sendable {
         self.apiV2 = clientV2
         self.compat = CompatibleAPI(detector: detector, v1: client, v2: clientV2)
         self.persist = persistStore
-        self.storePool = SessionStorePool()
+        self.storePool = SessionStorePool(v1Api: client)
         self.directoryManager = DirectoryStoreManager(persist: persistStore)
         self.bootstrapQueue = BootstrapQueue()
         self.healthMonitor = HealthMonitor()

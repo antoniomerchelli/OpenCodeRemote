@@ -6,7 +6,9 @@ import Foundation
 // info, messaggi, delta di testo per parte, todo, status, diff, permessi e
 // domande pendenti — e lo alimenta da due canali:
 //  - `apply(_:)`: reducer degli eventi SSE (`ServerEventV2`);
-//  - `sync`/`prefetch`: fetch REST paginato di `GET /api/session/:id/history`.
+//  - `sync`/`prefetch`: fetch REST paginato di `GET /api/session/:id/history`
+//    (a cui si aggiunge la cronologia v1 `GET /session/:id/message` sulla
+//    prima pagina, per server opencode ≤ 1.18 che non espongono le rotte v2).
 // L'ottimismo dei prompt segue il web (`server-session.ts`): un messaggio
 // utente locale viene inserito subito, segnato ottimistico, e poi confermato
 // o rimosso quando arriva la risposta del server.
@@ -104,6 +106,10 @@ public actor ServerSessionStore {
     public let sessionID: String
     /// Client REST v2 usato per i fetch (history, info).
     public let api: OpenCodeAPIClientV2
+    /// Client REST v1 opzionale: su server opencode ≤ 1.18 (che non espongono
+    /// la cronologia v2) `sync` fonde anche la cronologia legacy
+    /// (`GET /session/:id/message`) nella prima pagina, senza duplicati.
+    private let v1Api: V1OpenCodeAPIClient?
 
     // MARK: Stato interno
 
@@ -138,9 +144,10 @@ public actor ServerSessionStore {
     /// Timestamp dell'ultimo accesso (usato per l'eviction LRU del pool).
     var lastAccess: TimeInterval
 
-    public init(sessionID: String, api: OpenCodeAPIClientV2) {
+    public init(sessionID: String, api: OpenCodeAPIClientV2, v1Api: V1OpenCodeAPIClient? = nil) {
         self.sessionID = sessionID
         self.api = api
+        self.v1Api = v1Api
         self.lastAccess = Date().timeIntervalSince1970
         self.info = SessionInfoV2(id: sessionID, location: "")
     }
@@ -262,13 +269,19 @@ public actor ServerSessionStore {
     /// - `mode == .prepend`: pagina precedente (più vecchia) — i messaggi
     ///   vengono fusi in testa senza duplicati (dedup per id con `BinarySearch`).
     ///
+    /// Quando `before == nil` (prima pagina / refresh) la cronologia viene
+    /// integrata anche con la v1 (`GET /session/:id/message`), così i messaggi
+    /// storici restano visibili anche su server opencode ≤ 1.18 che non
+    /// espongono le rotte v2 della cronologia (best-effort: un errore v1 non
+    /// fa fallire il sync).
+    ///
     /// Gli errori di rete non vengono propagati: `meta.loading` torna `false`
     /// e lo stato precedente resta valido (best-effort, come il web).
     public func sync(limit: Int, before: String? = nil, mode: LoadMode) async {
         meta.loading = true
         defer { meta.loading = false }
         do {
-            let page = try await api.historyPage(id: sessionID, limit: limit, before: before)
+            let page = try await fetchPage(limit: limit, before: before)
             let incoming = page.messages.compactMap(SessionMessageDTOMapperV2.map)
             switch mode {
             case .replace:
@@ -295,6 +308,95 @@ public actor ServerSessionStore {
             }
         } catch {
             // Fetch fallito: lo stato precedente resta valido.
+        }
+    }
+
+    /// Fetch di una pagina di messaggi (DTO v2) + cursore successivo.
+    ///
+    /// Sulla prima pagina (`before == nil`) fonde anche la cronologia v1:
+    /// i messaggi legacy vengono mappati al dominio v2 (`mapV1ToV2`) e
+    /// riconvertiti in DTO tramite round-trip Codable, poi uniti ai v2
+    /// SENZA duplicati (precedenza ai messaggi v2, che sono più ricchi:
+    /// stesso `id` sul server per lo stesso messaggio).
+    private func fetchPage(limit: Int, before: String?) async throws -> (messages: [MessageV2DTO], nextCursor: String?) {
+        let page = try await api.historyPage(id: sessionID, limit: limit, before: before)
+        var messages = page.messages
+        if before == nil {
+            messages.append(contentsOf: await legacyMessagesV1(excluding: messages.map(\.id)))
+        }
+        return (messages, page.nextCursor)
+    }
+
+    /// Cronologia legacy v1 best-effort, come `[MessageV2DTO]`.
+    ///
+    /// Su server opencode ≤ 1.18 i messaggi storici arrivano SOLO da
+    /// `GET /session/:id/message` (le rotte v2 rispondono con HTML di
+    /// fallback). Ogni errore di fetch o mapping produce `[]`: il merge v1
+    /// non deve mai far fallire il sync.
+    private func legacyMessagesV1(excluding existingIDs: [String]) async -> [MessageV2DTO] {
+        let legacy = (try? await v1Api?.getSessionMessages(SessionID(rawValue: sessionID))) ?? []
+        var seen = Set(existingIDs)
+        return legacy.compactMap { message in
+            guard let domain = SessionMessageMapperV2.mapV1ToV2(message),
+                  let dto = legacyMessageDTO(from: domain),
+                  seen.insert(dto.id).inserted else { return nil }
+            return dto
+        }
+    }
+
+    /// Converte un `MessageV2` (dominio) in `MessageV2DTO` (wire) usando
+    /// parsing leniente (stesso pattern di `OpenCodeAPIClientV2.messageDTO(from:)`),
+    /// così i timestamp numerici (secondi epoch) vengono interpretati correttamente
+    /// come millisecondi per `PartTimeV2`.
+    private func legacyMessageDTO(from domain: MessageV2) -> MessageV2DTO? {
+        guard let data = try? JSONEncoder().encode(domain),
+              let jsonObject = try? JSONSerialization.jsonObject(with: data),
+              let dict = jsonObject as? [String: Any] else { return nil }
+        let raw = JSONValue.from(dict)
+        guard case .object(let obj) = raw else { return nil }
+        return MessageV2DTO(
+            id: obj["id"]?.stringValue ?? "",
+            type: obj["type"]?.stringValue,
+            metadata: obj["metadata"],
+            time: legacyPartTime(from: obj),
+            // `MessageV2.encode` per `.user` scrive `text`/`parts` a livello
+            // top (nessuna chiave `content`); per `.assistant` sotto `content`.
+            content: obj["content"] ?? obj["text"],
+            raw: obj
+        )
+    }
+
+    private func legacyPartTime(from raw: [String: JSONValue]) -> PartTimeV2? {
+        // Il dominio `MessageV2` serializza `time` come numero (secondi epoch).
+        // Il wire `PartTimeV2` si aspetta un oggetto con `created` in millisecondi.
+        // Gestiamo entrambi i formati.
+        switch raw["time"] {
+        case .object(let timeDict)?:
+            return PartTimeV2(
+                created: legacyDate(from: timeDict["created"]),
+                updated: legacyDate(from: timeDict["updated"]),
+                ran: legacyDate(from: timeDict["ran"]),
+                completed: legacyDate(from: timeDict["completed"]),
+                pruned: legacyDate(from: timeDict["pruned"])
+            )
+        case .number(let seconds)?:
+            // `MessageV2.time` è `TimeInterval` in secondi dall'epoch.
+            return PartTimeV2(created: Date(timeIntervalSince1970: seconds), updated: nil, ran: nil, completed: nil, pruned: nil)
+        default:
+            return nil
+        }
+    }
+
+    private func legacyDate(from value: JSONValue?) -> Date? {
+        switch value {
+        case .string(let string):
+            return ISO8601DateFormatter().date(from: string)
+        case .number(let number):
+            // Il dominio `MessageV2.time` è `TimeInterval` in SECONDI dall'epoch
+            // (il JSON del round-trip li serializza come numeri in secondi).
+            return Date(timeIntervalSince1970: number)
+        default:
+            return nil
         }
     }
 
