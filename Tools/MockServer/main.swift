@@ -463,6 +463,10 @@ final class MockServer {
         case ("GET", ["api", "question", "request"]):
             // QuestionV2: array nudo (stesso schema del permission list).
             connection.respondJSON(status: 200, jsonArray: questionRequestJSON()); return
+        case ("GET", ["api", "event"]):
+            // Stream SSE GLOBALE del wire reale (≥1.18): il client non usa più
+            // /api/session/:id/event. Il mock simula la sessione "sess-1".
+            streamDemo(connection: connection, sessionID: "sess-1", after: request.query["after"], scenario: config.scenario); return
         case ("GET", ["global", "health"]):
             handleV1Health(connection); return
         default:
@@ -484,11 +488,22 @@ final class MockServer {
             case ("POST", 4, "prompt"):
                 log("[EVT] prompt triggered for \(id) scenario=\(config.scenario.rawValue)")
                 broadcastDemo(sessionID: id)
-                // Il client decodifica MessageV2DTO dal body: risposta "ok"
-                // sola non è decodificabile; si ritorna un messaggio valido
-                // (stesso formato di shell/command).
-                let text = (request.bodyJSONObject()?["text"] as? String) ?? ""
-                connection.respondJSON(status: 200, object: shellMessageJSON(kind: "prompt", command: text)); return
+                // Wire reale: risposta `{data: {id, sessionID, prompt, delivery,
+                // timeCreated}}`. Il client decodifica MessageV2DTO in modo leniente
+                // (inline o sotto `data`). Ricama l'`id` inviato (prefisso `msg_`):
+                // `remapOptimistic` diventa un no-op (=confirm), come sul server reale.
+                let body = request.bodyJSONObject() ?? [:]
+                let prompt = body["prompt"] as? [String: Any] ?? body
+                let text = (prompt["text"] as? String) ?? ""
+                let sentID = (body["id"] as? String) ?? nextMessageID(kind: "prompt")
+                let now = Int(Date().timeIntervalSince1970 * 1000)
+                connection.respondJSON(status: 200, object: ["data": [
+                    "id": sentID,
+                    "sessionID": id,
+                    "prompt": ["text": text],
+                    "delivery": "steer",
+                    "timeCreated": now,
+                ]]); return
             case ("POST", 4, "model"):
                 connection.respondJSON(status: 200, object: echoBody(request)); return
             case ("POST", 4, "agent"):
@@ -515,6 +530,13 @@ final class MockServer {
                 connection.respondJSON(status: 200, object: shellMessageJSON(kind: "command", command: command)); return
             case ("GET", 4, "event"):
                 streamDemo(connection: connection, sessionID: id, after: request.query["after"], scenario: config.scenario); return
+            case ("GET", 4, "message"):
+                // Endpoint del wire reale per la lista messaggi: il client lo
+                // preferisce a /history (che sul server reale ritorna EVENTI).
+                var payload = historyJSON(sessionID: id)
+                payload["cursor"] = ["previous": "cur-2", "next": NSNull()]
+                payload.removeValue(forKey: "x-next-cursor")
+                connection.respondJSON(status: 200, object: payload); return
             case ("GET", 4, "history"):
                 var payload = historyJSON(sessionID: id)
                 if let after = request.query["after"] { payload["after"] = after }

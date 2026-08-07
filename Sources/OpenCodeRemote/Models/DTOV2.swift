@@ -138,6 +138,13 @@ public struct PartTimeV2: Codable, Equatable, Hashable, Sendable {
 // MARK: - Sessioni
 
 /// `Session.Info` v2 (§11 `session.ts`).
+///
+/// Il wire del server reale (1.18) differisce dal mock:
+/// - `model` è un oggetto `{ id, providerID, variant }` (non una stringa);
+/// - `location` è un oggetto `{ directory }` (non una stringa);
+/// - `time.*` è in millisecondi numerici (gestito dal decoder custom del client).
+/// Il `Decodable` qui è leniente: accetta entrambe le forme per restare
+/// compatibile con il mock e con le fixture dei test.
 public struct SessionV2Info: Decodable, Equatable, Hashable, Sendable {
     public var id: String
     public var parentID: String?
@@ -179,9 +186,50 @@ public struct SessionV2Info: Decodable, Equatable, Hashable, Sendable {
         self.subpath = subpath
         self.revert = revert
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, parentID, projectID, agent, model, cost, tokens, time, title, location, subpath, revert
+    }
+
+    private struct ModelRefWire: Decodable {
+        let id: String?
+        let modelID: String?
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        parentID = try container.decodeIfPresent(String.self, forKey: .parentID)
+        projectID = try container.decodeIfPresent(String.self, forKey: .projectID)
+        agent = try container.decodeIfPresent(String.self, forKey: .agent)
+        cost = try container.decodeIfPresent(CostV2.self, forKey: .cost)
+        tokens = try container.decodeIfPresent(TokenUsageV2.self, forKey: .tokens)
+        time = try container.decodeIfPresent(SessionTimeV2DTO.self, forKey: .time)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        subpath = try container.decodeIfPresent(String.self, forKey: .subpath)
+        revert = try container.decodeIfPresent(RevertStateV2DTO.self, forKey: .revert)
+
+        // model: stringa nuda (mock) o oggetto `{ id, modelID, ... }` (wire reale).
+        if let plain = try? container.decodeIfPresent(String.self, forKey: .model) {
+            model = plain
+        } else if let ref = try? container.decodeIfPresent(ModelRefWire.self, forKey: .model) {
+            model = ref.id ?? ref.modelID
+        } else {
+            model = nil
+        }
+
+        // location: stringa nuda (mock) o oggetto `{ directory }` (wire reale).
+        if let plain = try? container.decodeIfPresent(String.self, forKey: .location) {
+            location = plain
+        } else if let dict = try? container.decodeIfPresent([String: String].self, forKey: .location) {
+            location = dict["directory"]
+        } else {
+            location = nil
+        }
+    }
 }
 
-/// Cursore di paginazione.
+/// Cursore di paginazione. Il wire reale usa `previous`, il mock usa `prev`.
 public struct CursorV2: Codable, Equatable, Hashable, Sendable {
     public var next: String?
     public var prev: String?
@@ -190,10 +238,25 @@ public struct CursorV2: Codable, Equatable, Hashable, Sendable {
         self.next = next
         self.prev = prev
     }
+
+    private enum CodingKeys: String, CodingKey { case next, previous, prev }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        next = try container.decodeIfPresent(String.self, forKey: .next)
+        prev = (try? container.decodeIfPresent(String.self, forKey: .previous))
+            ?? (try? container.decodeIfPresent(String.self, forKey: .prev))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(next, forKey: .next)
+        try container.encodeIfPresent(prev, forKey: .previous)
+    }
 }
 
 /// Risposta di `sessions.list`: può essere un array nudo oppure
-/// `{ sessions|items, cursor }`.
+/// `{ sessions|items|data, cursor }` (il server reale usa `data`).
 public struct SessionListV2: Decodable, Equatable, Hashable, Sendable {
     public var sessions: [SessionV2Info]
     public var cursor: CursorV2?
@@ -203,7 +266,7 @@ public struct SessionListV2: Decodable, Equatable, Hashable, Sendable {
         self.cursor = cursor
     }
 
-    private enum CodingKeys: String, CodingKey { case sessions, items, cursor }
+    private enum CodingKeys: String, CodingKey { case sessions, items, data, cursor }
 
     public init(from decoder: Decoder) throws {
         if var container = try? decoder.unkeyedContainer() {
@@ -218,6 +281,7 @@ public struct SessionListV2: Decodable, Equatable, Hashable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         sessions = (try? container.decode([SessionV2Info].self, forKey: .sessions))
             ?? (try? container.decode([SessionV2Info].self, forKey: .items))
+            ?? (try? container.decode([SessionV2Info].self, forKey: .data))
             ?? []
         cursor = try container.decodeIfPresent(CursorV2.self, forKey: .cursor)
     }
@@ -268,8 +332,12 @@ public struct AgentAttachmentV2: Encodable, Equatable, Hashable, Sendable {
     }
 }
 
-/// Body di `sessions.prompt`. Sul wire il campo `prompt` viene emesso come
-/// `text` (vedi flusso §21.1), con `id, agent, model, legacyParts, files, agents`.
+/// Body di `sessions.prompt` del server reale 1.18.
+///
+/// Il wire invia il testo dentro l'oggetto `prompt`:
+/// `{ "id": "msg_…", "agent": "build", "model": {...}, "prompt": {"text": "…"} }`
+/// — NON più il campo piatto `text` del mock. L'`id` deve iniziare con il prefisso
+/// `msg_` (il server rifiuta id arbitrari con `Expected a string starting with "msg_"`).
 public struct SessionPromptV2: Encodable, Equatable, Hashable, Sendable {
     public var id: String
     public var agent: String?
@@ -304,20 +372,31 @@ public struct SessionPromptV2: Encodable, Equatable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, agent, model, delivery, resume, text, files, agents, legacyParts
+        case id, agent, model, delivery, resume, prompt, files, agents, legacyParts
+    }
+
+    /// Input di `sessions.prompt`: l'oggetto annidato `{ text }`.
+    private struct PromptInputV2: Encodable {
+        let text: String
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
+        // Normalizza il prefisso `msg_` (obbligatorio sul wire del server 1.18).
+        try container.encode(Self.normalizedID(id), forKey: .id)
         try container.encodeIfPresent(agent, forKey: .agent)
         try container.encodeIfPresent(model, forKey: .model)
         try container.encodeIfPresent(delivery, forKey: .delivery)
         try container.encodeIfPresent(resume, forKey: .resume)
-        try container.encode(prompt, forKey: .text)
         try container.encodeIfPresent(files, forKey: .files)
         try container.encodeIfPresent(agents, forKey: .agents)
         try container.encodeIfPresent(legacyParts, forKey: .legacyParts)
+        try container.encode(PromptInputV2(text: prompt), forKey: .prompt)
+    }
+
+    /// Aggiunge il prefisso `msg_` se manca.
+    public static func normalizedID(_ id: String) -> String {
+        id.isEmpty || id.hasPrefix("msg_") ? id : "msg_\(id)"
     }
 }
 
@@ -402,6 +481,8 @@ public struct MessageV2DTO: Decodable, Equatable, Hashable, Sendable {
     public var metadata: JSONValue?
     public var time: PartTimeV2?
     public var content: JSONValue?
+    /// Testo top-level dei messaggi user del wire reale (`{id, time, text, type}`).
+    public var text: String?
     public var raw: [String: JSONValue]
 
     public init(
@@ -410,6 +491,7 @@ public struct MessageV2DTO: Decodable, Equatable, Hashable, Sendable {
         metadata: JSONValue? = nil,
         time: PartTimeV2? = nil,
         content: JSONValue? = nil,
+        text: String? = nil,
         raw: [String: JSONValue] = [:]
     ) {
         self.id = id
@@ -417,6 +499,7 @@ public struct MessageV2DTO: Decodable, Equatable, Hashable, Sendable {
         self.metadata = metadata
         self.time = time
         self.content = content
+        self.text = text
         self.raw = raw
     }
 
@@ -424,7 +507,7 @@ public struct MessageV2DTO: Decodable, Equatable, Hashable, Sendable {
         let parts: [PartV2DTO]?
     }
 
-    private enum CodingKeys: String, CodingKey { case id, type, metadata, time, content }
+    private enum CodingKeys: String, CodingKey { case id, type, metadata, time, content, text }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -433,6 +516,7 @@ public struct MessageV2DTO: Decodable, Equatable, Hashable, Sendable {
         metadata = try container.decodeIfPresent(JSONValue.self, forKey: .metadata)
         time = try container.decodeIfPresent(PartTimeV2.self, forKey: .time)
         content = try container.decodeIfPresent(JSONValue.self, forKey: .content)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
         var rawDict: [String: JSONValue] = [:]
         for key in container.allKeys {
             if let value = try? container.decode(JSONValue.self, forKey: key) {
@@ -442,19 +526,27 @@ public struct MessageV2DTO: Decodable, Equatable, Hashable, Sendable {
         raw = rawDict
     }
 
-    /// Parti estratte da `content` (per i messaggi assistant).
+    /// Parti estratte dal contenuto (messaggi assistant). Il wire reale espone
+    /// `content` come array di parti classe `[{type, id, text}]`; il mock come
+    /// `{ parts: [...] }`. Entrambe le forme vengono accettate.
     public var parts: [PartV2DTO]? {
-        guard let content,
-              case .object(let dict) = content,
-              case .array(let rawParts) = dict["parts"] else { return nil }
-        let data = (try? JSONSerialization.data(withJSONObject: rawParts.map { $0.toAny() })) ?? nil
-        guard let data else { return nil }
-        return try? JSONDecoder().decode([PartV2DTO].self, from: data)
+        guard let content else { return nil }
+        switch content {
+        case .array(let rawParts):
+            guard let data = try? JSONSerialization.data(withJSONObject: rawParts.map { $0.toAny() }) else { return nil }
+            return try? JSONDecoder().decode([PartV2DTO].self, from: data)
+        case .object(let dict):
+            guard case .array(let rawParts) = dict["parts"] else { return nil }
+            guard let data = try? JSONSerialization.data(withJSONObject: rawParts.map { $0.toAny() }) else { return nil }
+            return try? JSONDecoder().decode([PartV2DTO].self, from: data)
+        default:
+            return nil
+        }
     }
 }
 
 /// Risposta di `messages.list`: può essere un array nudo oppure
-/// `{ messages, cursor }`.
+/// `{ messages|data, cursor }` (il server reale usa `data`).
 public struct MessageListV2: Decodable, Equatable, Hashable, Sendable {
     public var messages: [MessageV2DTO]
     public var cursor: CursorV2?
@@ -464,7 +556,7 @@ public struct MessageListV2: Decodable, Equatable, Hashable, Sendable {
         self.cursor = cursor
     }
 
-    private enum CodingKeys: String, CodingKey { case messages, cursor }
+    private enum CodingKeys: String, CodingKey { case messages, data, cursor }
 
     public init(from decoder: Decoder) throws {
         if var container = try? decoder.unkeyedContainer() {
@@ -477,7 +569,9 @@ public struct MessageListV2: Decodable, Equatable, Hashable, Sendable {
             return
         }
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        messages = (try? container.decode([MessageV2DTO].self, forKey: .messages)) ?? []
+        messages = (try? container.decode([MessageV2DTO].self, forKey: .messages))
+            ?? (try? container.decode([MessageV2DTO].self, forKey: .data))
+            ?? []
         cursor = try container.decodeIfPresent(CursorV2.self, forKey: .cursor)
     }
 }

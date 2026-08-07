@@ -122,8 +122,11 @@ private struct RetryScheduledPayloadV2: Decodable, Sendable {
 /// Stream SSE v2 per-sessione con parser robusto, anti-doppioni e reconnect
 /// con backoff esponenziale (specchia `useSessionStream` / `stream.ts` del web).
 ///
-/// - `stream(sessionID:server:after:)` apre `GET /api/session/:id/event?after=`
-///   e ritorna un `AsyncThrowingStream<ServerEventV2, Error>`.
+/// - `stream(sessionID:server:after:)` apre `GET /api/event?after=` (stream
+///   GLOBALE del server reale ≥1.18) e ritorna un
+///   `AsyncThrowingStream<ServerEventV2, Error>`. Gli eventi delle altre
+///   sessioni vengono scartati dal filtro per-sessione; il formato mock
+///   (`event:` lines) resta supportato per retro-compatibilità e test.
 /// - Quando lo stream termina (il server chiude) o c'è un errore di trasporto
 ///   *retryable*, il client si riconnette ripartendo da `after = ultimo id
 ///   ricevuto`, con backoff `streamReconnectDelayMS * 2^tries` (cap
@@ -166,6 +169,7 @@ public actor SessionEventStream {
         private var _lastActivity = Date()
         private var _isStreaming = false
         private var _watchdogFired = false
+        private var _connectionStartedAt: Date?
 
         var lastActivity: Date {
             get { lock.withLock { _lastActivity } }
@@ -175,6 +179,13 @@ public actor SessionEventStream {
         var isStreaming: Bool {
             get { lock.withLock { _isStreaming } }
             set { lock.withLock { _isStreaming = newValue } }
+        }
+
+        /// Inizio del tentativo di connessione della generazione corrente
+        /// (nil quando nessuna connessione è in fase di setup).
+        var connectionStartedAt: Date? {
+            get { lock.withLock { _connectionStartedAt } }
+            set { lock.withLock { _connectionStartedAt = newValue } }
         }
 
         /// Il watchdog ha scattato (connessione muta oltre la soglia).
@@ -213,7 +224,22 @@ public actor SessionEventStream {
     public init(session: URLSession = .shared) {
         self.session = session
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            // Server 1.18: `time.*` in millisecondi numerici.
+            if let ms = try? container.decode(Double.self) {
+                return Date(timeIntervalSince1970: ms / 1_000)
+            }
+            let string = try container.decode(String.self)
+            if let date = ISO8601DateFormatter().date(from: string) { return date }
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = fractional.date(from: string) { return date }
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: decoder.codingPath,
+                debugDescription: "Data non ISO8601 né millisecondi: \(string)"
+            ))
+        }
         self.decoder = decoder
     }
 
@@ -222,7 +248,7 @@ public actor SessionEventStream {
     /// Apre lo stream SSE v2 della sessione e ritorna la sequenza di eventi.
     ///
     /// - Parameters:
-    ///   - sessionID: id della sessione (`/api/session/:id/event`).
+    ///   - sessionID: id della sessione da osservare (filtro sul stream globale).
     ///   - server: connessione server (baseURL + header `authHeader`).
     ///   - after: cursore iniziale (nil = da capo). A ogni reconnect il client
     ///     riparte da `lastAfter` automaticamente.
@@ -338,13 +364,23 @@ public actor SessionEventStream {
         let watchdogTask = Task {
             let checkIntervalNS = UInt64(1_000_000_000)
             let idleThreshold = TimeInterval(idleTimeoutMS) / 1000
+            let connectThreshold = TimeInterval(CoreConstants.streamConnectTimeoutMS) / 1000
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: checkIntervalNS)
                 if Task.isCancelled { break }
-                guard idleState.isStreaming else { continue }
-                if Date().timeIntervalSince(idleState.lastActivity) > idleThreshold {
-                    idleState.markWatchdogFired()
-                    connectionBox.task?.cancel()
+                if idleState.isStreaming {
+                    // Connessione attiva: idle timeout (TCP zombie, sleep/wake).
+                    if Date().timeIntervalSince(idleState.lastActivity) > idleThreshold {
+                        idleState.markWatchdogFired()
+                        connectionBox.task?.cancel()
+                    }
+                } else if let started = idleState.connectionStartedAt {
+                    // Fase di setup: un IP black-hole (SYN drop) non deve tenere
+                    // il tentativo appeso per il timeout TCP di sistema.
+                    if Date().timeIntervalSince(started) > connectThreshold {
+                        idleState.markWatchdogFired()
+                        connectionBox.task?.cancel()
+                    }
                 }
             }
         }
@@ -358,6 +394,10 @@ public actor SessionEventStream {
             let connectionTask = Task { () -> Bool in
                 do {
                     let request = try makeRequest(sessionID: sessionID, server: server, after: afterValue)
+                    // Traccia l'inizio del tentativo: il watchdog usa questo
+                    // istante per il timeout di CONNESSIONE (SYN drop), mentre
+                    // il timeout di richiesta URLSession resta alto (idle).
+                    idleState.connectionStartedAt = Date()
                     let (bytes, response) = try await session.bytes(for: request)
 
                     guard let http = response as? HTTPURLResponse else {
@@ -379,12 +419,15 @@ public actor SessionEventStream {
                         retryHint: &retryHintMS,
                         coalescer: coalescer,
                         cursor: cursor,
-                        idleState: idleState
+                        idleState: idleState,
+                        targetSessionID: sessionID
                     )
                     idleState.isStreaming = false
+                    idleState.connectionStartedAt = nil
                     return ended
                 } catch {
                     idleState.isStreaming = false
+                    idleState.connectionStartedAt = nil
                     throw error
                 }
             }
@@ -487,7 +530,8 @@ public actor SessionEventStream {
         retryHint: inout Int?,
         coalescer: EventCoalescer,
         cursor: StreamCursorState,
-        idleState: IdleWatchState
+        idleState: IdleWatchState,
+        targetSessionID: String
     ) async throws -> Bool {
         var currentEvent = ""
         var currentData = ""
@@ -515,11 +559,12 @@ public actor SessionEventStream {
                 localRetryHint = Int(String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces))
             } else if line.isEmpty {
                 // Riga vuota = fine evento.
-                if !currentEvent.isEmpty {
+                if !currentEvent.isEmpty || !currentData.isEmpty {
                     await dispatch(
                         name: currentEvent,
                         data: currentData,
                         id: currentID,
+                        targetSessionID: targetSessionID,
                         onAfterChanged: onAfterChanged,
                         coalescer: coalescer,
                         cursor: cursor
@@ -553,11 +598,12 @@ public actor SessionEventStream {
         // senza inviare la riga vuota terminale (`\n\n`), i campi dell'evento
         // sono già stati raccolti ma `processLine("")` non è mai stato chiamato.
         // Dispatch manuale per non perdere l'ultimo evento.
-        if !currentEvent.isEmpty {
+        if !currentEvent.isEmpty || !currentData.isEmpty {
             await dispatch(
                 name: currentEvent,
                 data: currentData,
                 id: currentID,
+                targetSessionID: targetSessionID,
                 onAfterChanged: onAfterChanged,
                 coalescer: coalescer,
                 cursor: cursor
@@ -572,17 +618,45 @@ public actor SessionEventStream {
     /// coalescer, applicando l'anti-doppioni sull'`id`. Il cursore
     /// (`lastAfter`/`onAfterChanged`) avanza prima dell'enqueue: il delivery
     /// è ritardato al massimo di ~16ms, lo stato no.
+    ///
+    /// Due formati di wire:
+    /// - **mock**: righe `event:` separate (`name` passato) e payload diretto;
+    /// - **reale** (`/api/event`): nessuna riga `event:`; `data:` contiene
+    ///   l'envelope `{id, type, durable, location, data}` — il tipo è il campo
+    ///   `type`, l'id di cursore è il campo `id`, il payload da decodificare è
+    ///   l'oggetto annidato `data`. Lo stream è GLOBALE: gli eventi di altre
+    ///   sessioni vengono scartati (filtro su `data.sessionID` /
+    ///   `durable.aggregateID` vs `targetSessionID`).
     private func dispatch(
         name: String,
         data: String,
         id: String?,
+        targetSessionID: String,
         onAfterChanged: (@Sendable (String) -> Void)?,
         coalescer: EventCoalescer,
         cursor: StreamCursorState
     ) async {
-        guard let id else {
+        var resolvedName = name
+        var resolvedID = id
+        var resolvedPayload = data
+
+        // Formato reale: il tipo è dentro l'envelope JSON.
+        if resolvedName.isEmpty,
+           let envelope = Self.parseWireEnvelope(data) {
+            resolvedName = envelope.type ?? ""
+            resolvedID = envelope.id
+            resolvedPayload = envelope.payload ?? data
+            if let eventSessionID = envelope.sessionID,
+               eventSessionID != targetSessionID {
+                return // evento di un'altra sessione: scarta
+            }
+        }
+
+        guard !resolvedName.isEmpty, !resolvedPayload.isEmpty else { return }
+
+        guard let id = resolvedID else {
             // Eventi senza id: nessun cursore da avanzare, ma passa comunque.
-            if let event = makeEvent(name: name, data: data) {
+            if let event = makeEvent(name: resolvedName, data: resolvedPayload) {
                 await coalescer.enqueue(event)
             }
             return
@@ -593,9 +667,30 @@ public actor SessionEventStream {
         cursor.lastSeenRawID = id
         onAfterChanged?(id)
 
-        if let event = makeEvent(name: name, data: data) {
+        if let event = makeEvent(name: resolvedName, data: resolvedPayload) {
             await coalescer.enqueue(event)
         }
+    }
+
+    /// Envelope del wire reale (`/api/event`): `{id, type, durable, location, data}`.
+    /// Ritorna `nil` se `data` non è un oggetto JSON con campo `type`.
+    private static func parseWireEnvelope(_ data: String) -> (type: String?, id: String?, sessionID: String?, payload: String?)? {
+        guard let raw = data.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
+              obj["type"] is String else { return nil }
+        let type = obj["type"] as? String
+        let id = obj["id"] as? String
+        var sessionID = (obj["data"] as? [String: Any])?["sessionID"] as? String
+        if sessionID == nil, let durable = obj["durable"] as? [String: Any] {
+            sessionID = durable["aggregateID"] as? String
+        }
+        var payload: String?
+        if let nested = obj["data"],
+           let nestedData = try? JSONSerialization.data(withJSONObject: nested, options: .fragmentsAllowed),
+           let nestedString = String(data: nestedData, encoding: .utf8) {
+            payload = nestedString
+        }
+        return (type, id, sessionID, payload)
     }
 
     /// `true` se l'`id` è già stato visto (riproduzione dopo reconnect).
@@ -748,9 +843,101 @@ public actor SessionEventStream {
         case "session.aborted":
             return .sessionAborted
 
+        // MARK: Wire reale (`/api/event`, opencode ≥1.18): eventi `session.next.*`.
+        // Il payload passato qui è l'oggetto annidato `data` dell'envelope.
+
+        case "session.next.prompt.admitted", "session.next.prompted":
+            // Il server ha accettato il prompt: aggiorna/crea il messaggio utente
+            // con l'id e il testo reali (sostituisce l'ottimistico, idempotente).
+            if let message = decodeWireUserMessage(from: payload) {
+                return .sessionMessageUpdated(message)
+            }
+            return .sessionUnknown(name: name, data: payload)
+
+        case "session.next.step.started":
+            return .sessionStatus(.busy)
+        case "session.next.step.ended":
+            return .sessionStatus(.idle)
+
+        case "session.next.text.started":
+            let messageID = string(in: payload, for: ["assistantMessageID", "messageID", "messageId"]) ?? ""
+            let textID = string(in: payload, for: ["textID", "partID", "id"]) ?? ""
+            return .sessionMessagePartUpdated(messageID: messageID, partID: textID, state: "started")
+        case "session.next.text.delta":
+            let textID = string(in: payload, for: ["textID", "partID", "id"]) ?? ""
+            let messageID = string(in: payload, for: ["assistantMessageID", "messageID", "messageId"]) ?? ""
+            let partID = textID.isEmpty ? "\(messageID):text" : textID
+            return .sessionTextDelta(partID: partID, text: string(in: payload, for: ["delta", "text"]) ?? "")
+        case "session.next.text.ended":
+            // Testo completo: il messaggio assistant reale viene upsertato,
+            // la UI smette di rendere lo streaming (partTexts ripulite dallo store).
+            if let message = decodeWireAssistantMessage(from: payload) {
+                return .sessionMessageUpdated(message)
+            }
+            return .sessionUnknown(name: name, data: payload)
+
+        case "session.next.reasoning.delta":
+            let textID = string(in: payload, for: ["textID", "partID", "id"]) ?? ""
+            let messageID = string(in: payload, for: ["assistantMessageID", "messageID", "messageId"]) ?? ""
+            let partID = textID.isEmpty ? "\(messageID):reasoning" : textID
+            return .sessionReasoningDelta(partID: partID, text: string(in: payload, for: ["delta", "text"]) ?? "")
+        case "session.next.reasoning.started", "session.next.reasoning.ended":
+            let textID = string(in: payload, for: ["textID", "partID", "id"]) ?? ""
+            let messageID = string(in: payload, for: ["assistantMessageID", "messageID", "messageId"]) ?? ""
+            let partID = textID.isEmpty ? "\(messageID):reasoning" : textID
+            if name.hasSuffix(".started") {
+                return .sessionReasoningStarted(partID: partID)
+            }
+            return .sessionReasoningEnded(partID: partID)
+
+        case "session.next.usage.updated":
+            if let usage = try? decoder.decode(UsagePayloadV2.self, from: payload) {
+                return .sessionUsageUpdated(input: usage.input, output: usage.output, total: usage.total)
+            }
+            return .sessionUnknown(name: name, data: payload)
+
+        case "session.next.todo.updated":
+            if let todo = try? decoder.decode(TodoV2.self, from: payload) {
+                return .sessionTodoUpdated(todo: todo)
+            }
+            return .sessionUnknown(name: name, data: payload)
+
         default:
             return .sessionUnknown(name: name, data: payload)
         }
+    }
+
+    /// Messaggio utente dal payload di `session.next.prompt.admitted/prompted`:
+    /// `{messageID, prompt: {text, ...}}` (il wire usa `text` o `prompt.text`).
+    private func decodeWireUserMessage(from data: Data) -> MessageV2? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let messageID = obj["messageID"] as? String ?? obj["id"] as? String,
+              !messageID.isEmpty else { return nil }
+        var text = obj["text"] as? String
+        if text == nil, let prompt = obj["prompt"] as? [String: Any] {
+            text = prompt["text"] as? String
+        }
+        let time = Self.wireTimestamp(from: obj) ?? Date().timeIntervalSince1970
+        return MessageV2(id: messageID, time: time, content: .user(UserContentV2(text: text)))
+    }
+
+    /// Messaggio assistant dal payload di `session.next.text.ended`:
+    /// `{assistantMessageID, textID, text}`.
+    private func decodeWireAssistantMessage(from data: Data) -> MessageV2? {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let messageID = obj["assistantMessageID"] as? String ?? obj["id"] as? String,
+              !messageID.isEmpty else { return nil }
+        let textID = obj["textID"] as? String ?? "text-0"
+        let text = obj["text"] as? String ?? ""
+        let time = Self.wireTimestamp(from: obj) ?? Date().timeIntervalSince1970
+        let part = AssistantTextV2(id: textID, text: text, time: time)
+        return MessageV2(id: messageID, time: time, content: .assistant(AssistantContentV2(parts: [.text(part)])))
+    }
+
+    /// Timestamp in millisecondi (`data.timestamp`) → epoch in secondi.
+    private static func wireTimestamp(from obj: [String: Any]) -> TimeInterval? {
+        guard let millis = obj["timestamp"] as? NSNumber else { return nil }
+        return millis.doubleValue / 1_000
     }
 
     /// Decodifica `session.status` in `SessionStatusV2` (leniente: accetta sia
@@ -863,7 +1050,11 @@ public actor SessionEventStream {
         if let after {
             query = "?after=\(after.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? after)"
         }
-        guard let url = URL(string: "\(server.baseURL)/api/session/\(sessionID)/event\(query)") else {
+        // Wire reale: lo stream SSE è GLOBALE (`/api/event`), non per-sessione
+        // (il vecchio `/api/session/:id/event` non esiste nel server ≥1.18).
+        // Gli eventi delle altre sessioni vengono scartati in `dispatch` dal
+        // filtro su `targetSessionID`.
+        guard let url = URL(string: "\(server.baseURL)/api/event\(query)") else {
             throw ServerError(kind: .invalidURL, message: "URL stream non valido")
         }
         var request = URLRequest(url: url)
@@ -873,10 +1064,13 @@ public actor SessionEventStream {
         if let auth = server.authHeader {
             request.setValue(auth, forHTTPHeaderField: "Authorization")
         }
-        // Timeout di CONNESSIONE (non INT_MAX): un IP black-hole (SYN drop)
-        // non deve tenere il tentativo appeso per il timeout TCP di sistema
-        // (~60-75s) prima di ritentare il reconnect.
-        request.timeoutInterval = TimeInterval(CoreConstants.streamConnectTimeoutMS) / 1000
+        // Timeout di RICHIESTA (idle): in URLSession `timeoutInterval` scade se
+        // non arrivano byte per l'intervallo — NON è un timeout di connessione.
+        // Il server opencode non manda heartbeat regolari, quindi un valore
+        // basso ucciderebbe la connessione legittima durante i momenti muti.
+        // Il timeout di CONNESSIONE (SYN drop) è gestito dal watchdog applicativo
+        // (`IdleWatchState.connectionStartedAt`, `streamConnectTimeoutMS`).
+        request.timeoutInterval = TimeInterval(CoreConstants.streamIdleTimeoutMS) / 1000
         return request
     }
 

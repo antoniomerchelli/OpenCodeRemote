@@ -313,18 +313,33 @@ public actor ServerSessionStore {
 
     /// Fetch di una pagina di messaggi (DTO v2) + cursore successivo.
     ///
-    /// Sulla prima pagina (`before == nil`) fonde anche la cronologia v1:
-    /// i messaggi legacy vengono mappati al dominio v2 (`mapV1ToV2`) e
-    /// riconvertiti in DTO tramite round-trip Codable, poi uniti ai v2
-    /// SENZA duplicati (precedenza ai messaggi v2, che sono più ricchi:
-    /// stesso `id` sul server per lo stesso messaggio).
+    /// Il wire reale del server usa `GET /api/session/:id/message` (risposta
+    /// `{data, cursor}` con `cursor.prev` per paginare verso i più vecchi);
+    /// se quella rotta fallisce (mock/versioni che la espongono come
+    /// `history`), si ripiega su `GET /api/session/:id/history`.
+    ///
+    /// Sulla prima pagina (`before == nil`) fonde anche la cronologia v1
+    /// (`GET /session/:id/message`), così i messaggi storici restano visibili
+    /// anche su server opencode ≤ 1.18 che non espongono le rotte v2 della
+    /// cronologia. Il merge è best-effort, SENZA duplicati (precedenza ai
+    /// messaggi v2, che sono più ricchi: stesso `id` sul server per lo stesso
+    /// messaggio).
     private func fetchPage(limit: Int, before: String?) async throws -> (messages: [MessageV2DTO], nextCursor: String?) {
-        let page = try await api.historyPage(id: sessionID, limit: limit, before: before)
-        var messages = page.messages
+        var messages: [MessageV2DTO]
+        var nextCursor: String?
+        do {
+            let list = try await api.messageList(id: sessionID, limit: limit, order: "asc", cursor: before)
+            nextCursor = list.cursor?.prev ?? list.cursor?.next
+            messages = list.messages
+        } catch {
+            let page = try await api.historyPage(id: sessionID, limit: limit, before: before)
+            nextCursor = page.nextCursor
+            messages = page.messages
+        }
         if before == nil {
             messages.append(contentsOf: await legacyMessagesV1(excluding: messages.map(\.id)))
         }
-        return (messages, page.nextCursor)
+        return (messages, nextCursor)
     }
 
     /// Cronologia legacy v1 best-effort, come `[MessageV2DTO]`.
@@ -346,8 +361,8 @@ public actor ServerSessionStore {
 
     /// Converte un `MessageV2` (dominio) in `MessageV2DTO` (wire) usando
     /// parsing leniente (stesso pattern di `OpenCodeAPIClientV2.messageDTO(from:)`),
-    /// così i timestamp numerici (secondi epoch) vengono interpretati correttamente
-    /// come millisecondi per `PartTimeV2`.
+    /// così i timestamp numerici (secondi epoch) vengono interpretati
+    /// correttamente per `PartTimeV2`.
     private func legacyMessageDTO(from domain: MessageV2) -> MessageV2DTO? {
         guard let data = try? JSONEncoder().encode(domain),
               let jsonObject = try? JSONSerialization.jsonObject(with: data),
@@ -367,9 +382,6 @@ public actor ServerSessionStore {
     }
 
     private func legacyPartTime(from raw: [String: JSONValue]) -> PartTimeV2? {
-        // Il dominio `MessageV2` serializza `time` come numero (secondi epoch).
-        // Il wire `PartTimeV2` si aspetta un oggetto con `created` in millisecondi.
-        // Gestiamo entrambi i formati.
         switch raw["time"] {
         case .object(let timeDict)?:
             return PartTimeV2(
@@ -730,6 +742,10 @@ private enum SessionMessageDTOMapperV2: Sendable {
             }
         }
         if userParts.isEmpty, case .string(let s)? = dto.content, !s.isEmpty {
+            text = s
+            userParts = [.text(UserTextPartV2(text: s))]
+        } else if userParts.isEmpty, let s = dto.text, !s.isEmpty {
+            // Wire reale: i messaggi user hanno `text` top-level (no `content`).
             text = s
             userParts = [.text(UserTextPartV2(text: s))]
         }

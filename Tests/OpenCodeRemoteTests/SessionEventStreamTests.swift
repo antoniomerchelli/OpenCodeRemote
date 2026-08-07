@@ -55,6 +55,67 @@ final class SessionEventStreamTests: XCTestCase {
         XCTAssertEqual(events, [.sessionAborted])
     }
 
+    // MARK: - Wire reale (`/api/event`, envelope `data:` senza righe `event:`)
+
+    /// Lo stream usa l'endpoint GLOBALE `/api/event` (il per-sessione non esiste
+    /// nel server ≥1.18).
+    func testWireRequestUsesGlobalEventEndpoint() async throws {
+        var requestedPath: String?
+        MockURLProtocol.responseHandler = { request in
+            requestedPath = request.url?.path
+            let sse = ""
+            let data = sse.data(using: .utf8)!
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"])!
+            return (data, response, nil)
+        }
+
+        let server = ServerConnection.testConnection()
+        let eventStream = await stream.stream(sessionID: "sess-1", server: server, reconnect: false, maxReconnectAttempts: 0)
+        for try await _ in eventStream {}
+        XCTAssertEqual(requestedPath, "/api/event")
+    }
+
+    /// Envelope wire reale: tipo/id/payload dentro il JSON `data:`. Gli eventi
+    /// di altre sessioni vengono scartati dal filtro.
+    func testWireEnvelopeParsesAndFiltersBySession() async throws {
+        MockURLProtocol.responseHandler = { request in
+            let sse = """
+                data: {"id":"evt-alt","type":"session.next.text.delta","durable":{"aggregateID":"ses_other","seq":1,"version":1},"location":{"directory":"/tmp"},"data":{"timestamp":1770000001000,"sessionID":"ses_other","assistantMessageID":"msg_alt","textID":"text-0","delta":"ignored"}}
+
+                data: {"id":"evt_1","type":"session.next.prompt.admitted","durable":{"aggregateID":"sess-1","seq":1,"version":1},"location":{"directory":"/tmp"},"data":{"timestamp":1770000000000,"sessionID":"sess-1","messageID":"msg_1","prompt":{"text":"hello"}}}
+
+                data: {"id":"evt_2","type":"session.next.step.started","durable":{"aggregateID":"sess-1","seq":2,"version":1},"location":{"directory":"/tmp"},"data":{"timestamp":1770000001000,"sessionID":"sess-1"}}
+
+                data: {"id":"evt_3","type":"session.next.text.delta","durable":{"aggregateID":"sess-1","seq":3,"version":1},"location":{"directory":"/tmp"},"data":{"timestamp":1770000002000,"sessionID":"sess-1","assistantMessageID":"as_msg","textID":"text-0","delta":"Hi"}}
+
+                data: {"id":"evt_4","type":"session.next.text.delta","durable":{"aggregateID":"sess-1","seq":4,"version":1},"location":{"directory":"/tmp"},"data":{"timestamp":1770000003000,"sessionID":"sess-1","assistantMessageID":"as_msg","textID":"text-0","delta":" there"}}
+                """
+            let data = sse.data(using: .utf8)!
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"])!
+            return (data, response, nil)
+        }
+
+        let server = ServerConnection.testConnection()
+        let eventStream = await stream.stream(sessionID: "sess-1", server: server, reconnect: false, maxReconnectAttempts: 0)
+
+        var events: [ServerEventV2] = []
+        for try await event in eventStream {
+            events.append(event)
+        }
+
+        // L'evento di `ses_other` è scartato; gli altri sono mappati sul dominio.
+        let expected: [ServerEventV2] = [
+            .sessionMessageUpdated(MessageV2(
+                id: "msg_1",
+                time: 1_770_000_000,
+                content: .user(UserContentV2(text: "hello"))
+            )),
+            .sessionStatus(.busy),
+            .sessionTextDelta(partID: "text-0", text: "Hi there"),
+        ]
+        XCTAssertEqual(events, expected)
+    }
+
     // MARK: - Anti-duplication Tests
 
     /// Lo stream scarta eventi con stesso `id:` numerico (anti-doppioni).

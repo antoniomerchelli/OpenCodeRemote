@@ -1,81 +1,34 @@
-# OpenCode Remote — Session Summary
+# Session Summary — Fix model-oggetto + stress test 162/162 verdi + analisi CRITICI server reale
 
-## Stato attuale (al 6 Ago 2026 — Sessione 13)
-- **DEPLOY SU IPHONE FISICO COMPLETATO**: build device (`generic/platform=iOS`) SUCCEEDED, app installata e avviata su "iPhone di Leo" (iPhone 14 Pro, UUID 91B0FEB3-3149-5B40-AC64-06F86C63E030) → "App installed: io.opencode.remote" + "Launched application". DEVELOPMENT_TEAM 3J5D3W56UZ già nel pbxproj (Debug+Release). Un rilancio successivo ha fallito per tunnel CoreDevice caduto (errore di rete locale/standby, NON dell'app).
-- **COMMIT 2dcbe0d creato** "fix(permissions): support real SSE event names without session. prefix" (20 file, +858/-165): include il fix Sessione 12 + fix residui (HealthMonitor multi-consumer, remapOptimistic, ServerError, MainViews/OpenCodeIntents/TerminalView/SettingsView/SessionViews). Nessun segreto nel diff. **Branch main AHEAD 1: commit NON pushato su origin/main.**
-- **Bug critico permessi/domande CONFERMATO RISOLTO sul wire reale**: e2e dal vivo con mock `--scenario permission-question` → 6/6 eventi mappati (permission.asked/replied, question.asked/replied, session.status x2), ZERO `session.unknown`; roundtrip REST verificato via curl (question reply/reject 200, permission reply 200).
-- Baseline: `swift build` pulito, `swift test` **82/82 verdi**, `xcodebuild` simulatore (iPhone 17 Pro) SUCCEEDED (solo warning deprecazione pre-esistente).
-- **Il progetto ORA È un repo git** (remote origin = https://github.com/antoniomerchelli/OpenCodeRemote.git, branch main) — la nota "progetto NON è un repo git" della Sessione 12 è OBSOLETA.
-- **Config globale opencode sistemata (Sessione 13)**: session-scribe.md e error-analyst.md ora permettono write su `**/.opencode/memory/*.md` + `mkdir -p` (bootstrap); skill session-summary aggiornata con sezione Bootstrap; AGENTS.md globale aggiornato con regole di delega (contesto obbligatorio nel prompt, fallback orchestrator, verifica del risultato). **NOTA: il subagent session-scribe ha dichiarato completed senza scrivere (recidiva) → il flusso primario di salvataggio è ora l'orchestrator che scrive direttamente.**
+## Obiettivo
+Completare lo stress test su tutti i livelli, correggere i failure rimanenti, build finale e verifica live su iPhone.
 
-## Prossimi passi consigliati
-1. **Push del commit 2dcbe0d su origin/main** (chiedere all'utente).
-2. **Decidere il destino di `FileExplorerView.swift` (919 righe) e `AgentViews.swift` (938 righe)** — ORFANI: nessuna tab li usa (MainTabView ha solo Dashboard/Sessions/Terminal/Settings); implementazioni complete ma non cablate. Non rimossi per non distruggere feature pianificate.
-3. **Test manuale sul dispositivo fisico**: dock permessi/domande con mock `--scenario permission-question` (verifica visiva su iPhone).
-4. **Eventuale aggiornamento README** con istruzioni deploy device (`xcrun devicectl device install app`).
-5. Migrazione UI v1 legacy: **GIÀ COMPLETATA** (SessionDetailView non esiste più; Dashboard/Sessions navigano a ConsoleView→SessionChatView v2).
+## Fatto
+- **Fix bug "Chat v2 non supportata" (Sessione 15)**: `Project` custom Codable leniente, `connectV2` chiamato PRIMA di `loadInitialData`, `loadInitialData` best-effort merge per id. Verificato: 88/88 test + build iOS Simulator OK.
+- **Stress test 5 agenti** (modelli, server reale, SSE, store, mock E2E): 55 test modelli senza CRITICI; server reale 3 CRITICI (DELETE v2 → HTML, shell/command v2, cronologia legacy); SSE 10 ATTENZIONE; store 10 OK; mock E2E 60+ rotte OK, 50/50 stress OK.
+- **Correzioni test**: `await` estratti da autoclosure, `assistantMessage` qualificato, `snapshots()` infinito → riscritto `testAccumulatorSnapshot1000Parts` per leggere primo elemento. `swift test` completa (~162 test) senza bloccarsi.
+- **`testMicroDeltas1000ishConcatenateExact` risolto**: il coalescer NON perde caratteri — il flush periodico divide i 1000 delta in 2 batch. Test aggiornato per concatenare tutti i testi ricevuti e verificare uguaglianza esatta (≤3 eventi).
+- **Fix SessionInfoV2.model**: custom Decodable che accetta sia stringa nuda (mock) sia oggetto `{id, modelID, variant, providerID}` (wire reale), pattern identico a `SessionV2Info`/`ModelRefWire` in DTOV2.swift.
+- **Fix testAccumulatorSnapshot1000Parts**: aspettativa corretta — la prima notifica snapshot riflette lo stato al momento del primo accumulo (`"x0;"`), non lo stato finale.
+- **swift test completo: 162/162 VERDI** (3.7s).
 
-## Problemi aperti / blocchi
-- **Commit 2dcbe0d non pushato** (ahead 1 su origin/main).
-- **Recidiva subagent session-scribe**: dichiara `completed` senza scrivere il file (già vista per "general" F1→F4). Mitigazione definitiva: l'orchestrator scrive direttamente il session-summary (fallback fail-safe, regola in AGENTS.md globale §7).
-- Tunnel CoreDevice verso iPhone può cadere (error 4000/transport) — problema di rete locale/standby, NON dell'app.
-- Note residue accettate dal red team (Sessione 12): card minime "Domanda in attesa" con budget 3 tentativi; refetch-per-snapshot caso parziale; mock riemette `*.asked` su reconnect.
-- Dynamic Type non supportato (limite SDK: `Font.relativeTo` inesistente); contrasto AA borderline `secondary` #78706A (~4:1).
+## Analisi CRITICI server reale (opencode 1.18.14 @ 192.168.1.133:4096)
+1. **DELETE /api/session/:id → 200 HTML** — Solo `DELETE /session/:id` (v1) elimina. L'app USA GIÀ v1 (`apiClient.deleteSession`) → **funziona, nessun fix app**.
+2. **GET /api/session/:id/message e /history v2 vedono SOLO messaggi post-v2** — v1 legacy invisibili. Verificato live: sessione legacy `ses_0276825a2ffe5NiyhESnxspyi1` → v2: 1 msg (`msg_strtest123`), v1: 21 msg legacy (DISJOINT sets). **Fix necessario**: `ServerSessionStore.fetchPage` deve fare merge v2+v1 (mapping via `SessionMessageMapperV2.mapV1ToV2`).
+3. **POST /api/session/:id/shell e /command → 200 HTML** — `ShellCommandRunner` usa v2 diretto (non ancora cablato in UI). **Fix necessario**: fallback v1 nel client v2 (`shell`/`command`/`remove`) quando risposta è HTML (SPA fallback).
 
-## Note d'ambiente
-- **Xcode 26.6, simulatore "iPhone 17 Pro"**; XcodeGen 2.46 via brew (OBBLIGATORIO: `generate-xcodeproj` rimosso da Swift 6).
-- **Deploy device**: `DEVELOPMENT_TEAM=3J5D3W56UZ` già nel pbxproj; build `xcodebuild -project OpenCodeRemote.xcodeproj -scheme OpenCodeRemoteApp -destination 'generic/platform=iOS' -derivedDataPath /tmp/ocr-dd build`; install `xcrun devicectl device install app --device <UUID> <path>.app`; launch `xcrun devicectl device process launch --terminate-existing --device <UUID> io.opencode.remote`.
-- **AppState è in `Sources/OpenCodeRemote/Services/AppState.swift`** (NON in `Sources/OpenCodeRemote/AppState.swift`).
-- **`availableModels` è `[ModelOption]`** (id, providerID, displayName), NON `[Model]`.
-- **Il decoder client v2 usa `.iso8601`** per le Date → nei fixture JSON le date vanno come stringhe ISO8601.
-- **OpenCodeAPIClientV2 ha `init(session: URLSession = .shared)`** → nei test iniettare URLSession con MockURLProtocol.
-- **NOMI EVENTI SSE REALI**: il server emette `permission.asked`, `permission.replied`, `question.asked`, `question.replied`, `question.rejected`, `todo.updated` SENZA prefisso `session.` — il parser accetta entrambe le forme. Helper `requestID(in:)` per payload piatti o annidati; eventi senza requestID → `.sessionUnknown`.
-- **CompatibleAPI** copre anche domande: `questionReply(server:reply:)` e `questionReject(server:sessionID:requestID:)` con dispatch v1/v2. MAI bypassare con apiV2 diretto da AppState.
-- **La build macOS avviene via SwiftPM** (`swift build`/`swift test`); il progetto Xcode è iOS-only.
-- Comandi verificati: `swift build`, `swift test` (**82**), `swift run MockServer --port N --scenario burst50|delta50|reconnect-test|error|degraded|permission-question`, `swift run OpenCodeWidgets <detect|session-create|prompt|stream|revert|pty|health>`, build simulatore + device.
-- macOS 26.5: `URLSessionWebSocketTask.sendPing` non completa MAI il callback → NON usare ping/pong per waitForOpen (polling su task.response).
-- **CONFIG GLOBALE**: modifiche a `~/.config/opencode/` (agent/skills/AGENTS.md) valgono al RIAVVIO di opencode (config caricata all'avvio). Pattern permessi subagent SEMPRE con prefisso `**/`.
-- Subagent "general"/"session-scribe" possono dichiarare completed senza file (recidiva F1→F4): verificare SEMPRE `ls` + contenuto e rilanciare su stessa task_id, oppure scrivere direttamente.
+## Gap mock
+- `/project` mancante, `/session/status` shape errata → da allineare per test E2E completi.
 
----
+## Prossimi passi (prossima sessione)
+1. Implementare fallback v1 in `OpenCodeAPIClientV2.remove/shell/command` (detect HTML → retry v1 path).
+2. Estendere `ServerSessionStore.fetchPage` con merge v2+v1 (usare `SessionMessageMapperV2.mapV1ToV2`).
+3. Allineare mock `/project` e `/session/status`.
+4. Red Team finale sul diff completo.
+5. Build iOS + installazione iPhone (quando ricollegato) → "LIVE-OK" → commit.
 
-## Sessione del 6 Ago 2026 — Sessione 13: deploy iPhone + commit + sistemazione globale config
-**Fatto:** (1) Baseline 82/82 test verdi; (2) e2e dal vivo mock `permission-question`: 6/6 eventi mappati, 0 session.unknown, roundtrip REST reply/reject OK → bug Sessione 12 confermato risolto sul wire reale; (3) xcodebuild simulatore SUCCEEDED; (4) commit 2dcbe0d (20 file, +858/-165, nessun segreto); (5) verificato che la migrazione UI v1→v2 è già completa (SessionDetailView non esiste più); (6) DEPLOY su iPhone 14 Pro fisico completato (build device + install + launch); (7) sistemazione globale config opencode: permessi session-scribe/error-analyst su `**/.opencode/memory/*.md` + `mkdir -p`, skill session-summary con Bootstrap, AGENTS.md con regole di delega robuste; (8) subagent session-scribe ha dichiarato completed SENZA scrivere (recidiva) → fallback: orchestrator scrive direttamente il file.
-**Decisioni:** il commit resta NON pushato (push richiesto all'utente); gli orfani FileExplorerView/AgentViews non vengono rimossi (decisione utente); il salvataggio del session-summary passa da "delega a subagent" a "l'orchestrator scrive direttamente" (flusso primario) per eliminare la fragilità.
-**Errori/lezioni:** recidiva "subagent completed senza scrittura" (session-scribe, come general F1→F4) → lezione: per il session-summary l'orchestrator scrive SEMPRE direttamente e verifica il file; vedere lessons.md.
-
-## Sessione del 5 Ago 2026 — Sessione 12: fix bug critico permessi/domande (SSE senza prefisso `session.`)
-**Fatto:** risolto il bug prioritario utente (dock permessi/domande mai popolato). Fix: (1) `SessionEventStream.swift` — i case del parser accettano nomi con e senza prefisso `session.` per permission.*/question.* (+ `todo.updated`), nuovo helper `requestID(in:)` per payload piatti o annidati, eventi senza requestID scartati (.sessionUnknown); (2) `CompatibleAPI.swift` — nuovi `questionReply`/`questionReject` con dispatch v1/v2; (3) `AppState.swift` — answerQuestion/declineQuestion passano da compat, gestito il nuovo case `.questionRejected` (rimuove da pendingQuestions); (4) `Models.swift` — nuovo case SSEEvent `questionRejected(Question)`; (5) `APIClient.swift` — parser v1 gestisce "question.rejected"; (6) `SessionChatView.swift` — syncPermissionsAndQuestions con fallback: card minime se fetch dettagli vuoto ma snapshot ha pendingID, non sovrascrive card reali, refetch con budget 3 tentativi (flag permissionsAreFallback/questionsAreFallback + *FallbackAttempts); (7) `Tools/MockServer/main.swift` — nuovo scenario `permissionQuestion` ("permission-question") con nomi reali e payload completi, niente più `try!` (guard con fallback a session.status idle). Test E2E nuovi: `testSSERealEventNamesWithoutSessionPrefix`, `testSSEQuestionRejectedRemovesPending`. Verifica: build 0 errori/warning, 81/81 test, mock compila. Red team: zero [CRITICO]; note risolte (fallback sovrascriveva card reali → protetto; try! nel mock → rimosso; question.rejected v1 → aggiunto; requestID vuoto → scartato); 3 note accettate (card minime in attesa con budget 3 tentativi, refetch-per-snapshot caso parziale, mock riemette asked su reconnect).
-**Decisioni:** gli eventi SSE vanno gestiti per nome reale del server (senza prefisso) mantenendo retro-compatibilità con la forma `session.`; il percorso domande deve passare SEMPRE da CompatibleAPI (mai apiV2 diretto da AppState — su server v1 falliva); il fallback del dock non deve MAI sovrascrivere card reali già presenti.
-**Errori/lezioni:** vedere lessons.md se aggiunte (causa radice: parser SSE troppo rigido rispetto al wire reale — lezione: validare il parser contro il wire vero, non contro il mock).
-
-## Sessione del 3 Ago 2026 — Sessione 11: verifica totale + fix core + audit sicurezza + fix UI delegati
-**Fatto:** audit funzionale e2e stress (101 check STABILE); audit UI ~200 incongruenze corrette; audit core 4 ALTA fixati (A1 reconnect SSE v1, A2 anti-doppioni per-chiamata + test, A3 onTermination subscribeSessions, A4 204 body vuoto + test) + AppIntents + foreground reconnect + dedup sessioni; audit sicurezza PULITE (0 try!/as!/fatalError, 0 segreti log); fix UI critici delegati a subagent (bottom nav padding, retry chat, collega ora finto, toggle spazzatura, selettore ragionamento, empty state v1, double sheet, accessibility labels); build 0 errori 0 warning, 79/79 test (2 nuovi), xcodebuild simulatore SUCCEEDED.
-**Decisioni:** A2 isolamento per-chiamata via `StreamCursorState` class (non struct, per mutabilità in async); A4 performNoContent gestisce body vuoto prima di decodificare; A1 loop while con backoff PTYClient.backoffMS; A3 onTermination cancella task polling healthMonitor; dedup sessionCreated usa firstIndex + sort; AppIntents cablato in onAppear iOS-only; foreground reconnect su .active con connect(to:).
-**Errori/lezioni:** recidiva "subagent general report vuoto senza lavoro" (3ª volta in questa sessione) → verificare SEMPRE conteggi/build dopo ogni report e rilanciare su stessa task_id (lezione già nota, riapplicata con successo); session-scribe bloccato da config vecchia (pattern relativi) → fix su disco, vale al riavvio.
-
-## Sessione del 3 Ago 2026 — Sessione 10: verifica totale a tutti i livelli (build + funzionale + UI)
-**Fatto:** audit funzionale e2e con subagent → 28/28 PASS (MockServer + harness detect/session-create/prompt/stream/revert/pty/health + framework; reconnect senza duplicati, coalescenza flush 16ms verificata); audit UI con subagent → ~200 incongruenze (63 colori raw, 39 foregroundColor(.primary/.secondary), 57 spacing magici, 14 radius fuori scala, 57 tipografia incoerente, 1 icona non mappata, 8 coppie di duplicati, 2 ombre dirette); migrazione eseguita da subagent (rilancio dopo report vuoto — recidiva) ~203 sostituzioni + fix: chevron_right mappato, 4 radius 20/24 pill→full, NeutralSearchBar icona search/close + fusione SearchBarField, branch git→success, headline(18)→20, codice morto rimosso (ThinkingBubble, ToolCallCard); verifica finale: build 0 errori 0 warning, 77/77 test, xcodebuild simulatore SUCCEEDED, e2e rapido ri-eseguito OK, zero icone non mappate, zero componenti morti residui (solo AgentsView/ProvidersView orfane, già note).
-**Decisioni:** i colori di palette (agentColor avatar, ANSI terminale, syntax-highlight) NON vanno mappati sui token status (sono palette, non stati); AgentsView/FileExplorerView orfani ricevono comunque la migrazione token (coerenza futura) ma niente refactoring architetturale finché non si decide il loro destino; bottoni CTA h≈44 con radius 20/24 → full.
-**Errori/lezioni:** recidiva "subagent general report vuoto senza lavoro" (2ª volta in questa sessione) → verificare SEMPRE conteggi/build dopo ogni report e rilanciare su stessa task_id (lezione già nota, riapplicata con successo).
-
-## Sessione del 3 Ago 2026 — Sessione 9: audit UI+logica e fasi F1–F5 "tutto perfetto"
-**Fatto:** audit con 2 sub-agent (design system + logica) → scoperto `connectV2` mai chiamato a runtime (chat v2 inerte); F1 logica completa (cablaggio connectV2+eviction+idempotenza, chat re-entry/banner/empty/draft, paginazione con cursor, evento sessionAborted, dock permessi tutti gli entry con pendingReplies, mergeV2Sessions + subscribeSessions in Dashboard/Sessioni); F2 token design (SaharaSpacing/Radius/Elevation/StatusColor + mappa icone completa); F3 migrazione tipografica (75 occorrenze → SaharaFont) + NeutralCard/StatusBadge/NeutralStatusChip ai token; F4 accessibilityLabel su StatusBadge (Dynamic Type impossibile: Font.relativeTo inesistente); F5 findModel funzionante su [ModelOption], commento attachPTY rimosso, PlatformHelpers.swift rimosso + pbxproj pulito; 3 test nuovi → 77/77 verdi; xcodebuild simulatore SUCCEEDED.
-**Decisioni:** il cablaggio v2 va fatto in `connect(to:)` come bootstrap non fatale (la connessione v2 non deve rompere il percorso v1); il dock mostra TUTTI i permessi/domande pendenti (non solo il primo); `mergeV2Sessions` dedup per id e ordina per updatedAt desc; non aggiunte tab nuove (FileExplorerView/AgentViews orfani restano fuori dalle tab).
-**Errori/lezioni:** lezione 3 recidiva (session-scribe bloccato sui pattern relativi anche in questa sessione — config vecchia in memoria; fix già applicato su disco, vale al riavvio); `Font.relativeTo` inesistente nel toolchain (rollback); `availableModels` è `[ModelOption]` non `[Model]` (errore Xcode corretto); test con aspettativa errata su ordinamento merge (corretto il test, non il codice).
-
-## Sessione del 3 Ago 2026 — Sessione 8: F4 "Session Chat v2" completata
-**Fatto:** Core ServerSessionStore (partTextOrder, pulizia delta alla conferma con `Self.partIDs(of:)`, updateToolParts terminale, cleanup su partRemoved/compactionStarted); AppState (sessionEventStream, subscribeSessionMessages con sync `.replace` + loop SSE, loadOlderMessages `.prepend`, replyPermission/answerQuestion/declineQuestion, pending*); nuova UI SessionChatView (ViewModel @Observable, ChatScreen, MessageRowV2 + 11 sotto-viste, StreamingBlockV2, PermissionDockV2, QuestionDockV2, ChatComposerV2, MiniMarkdown); ConsoleView → wrapper su SessionChatView; rimosso AgentMessageView morto; fix `.autocapitalization` iOS-only; fix decodeMessageV2 (preserva id/tipo delle part nel fallback mock); test aggiornati + 2 e2e nuovi (73/73 verdi); progetto Xcode rigenerato + build simulatore SUCCEEDED; fix config permessi session-scribe/error-analyst (pattern `**/`).
-**Decisioni:** il fallback "shape mock" del decoder deve preservare id e tipo delle parti (text/reasoning/tool) — necessario per la pulizia delta col wire del mock server; ConsoleView diventa un wrapper sottile su SessionChatView (niente UI duplicata).
-**Errori/lezioni:** lezione 3 recidiva (session-scribe bloccato sui pattern relativi) → fix permanente applicato alla config; vedere lessons.md.
-
-## Sessione del 2 Ago 2026 (pomeriggio) — Sessione 7: piano F0–F8 completato + progetto Xcode iOS funzionante
-**Fatto:** Wave 0 (MockServer: burst50, id monotoni, ws finto, rotte pty/revert, fix wire time/location, SIGPIPE); Wave 1 (cablaggio F2 con fix bug \n\n, dedup PTYClient 450→310 righe); Wave 2 (harness stream/pty + e2e 11/11+3/3); Wave 3 (F4 744+113 righe 31/31, F5 3 file 33/33 — rilancio E dopo report vuoto); Wave 4 (AppState façade 27/27, harness 7 comandi e2e completo, XCTest 29 test + Docs); Wave 5 (rename DS*, unificazione componenti MainViews/SessionViews, XcodeGen setup, build simulatore+device, app avviata su iPhone 17 Pro, README).
-**Decisioni:** framework core iOS-only nel progetto Xcode (macOS resta via SwiftPM); test target riattivato su macOS (l'utente ha Xcode); skeleton OpenCodeRemote/ in root lasciata; AppShortcut phrases senza parametri (String non ammessi in utterance).
-**Errori/lezioni:** vedi lessons.md (recidiva report vuoto; sendPing macOS; AsyncStream===; Task.sleep overload; mock wire format).
-
-## Sessione del 2 Ago 2026 (notte) — Sessione 6: Wave 1 completata, Wave 2 avviata
-Fix build UI (strip duplicati LoadingView/ErrorView/EmptyStateView da FileExplorerView); F0 (CoreConstants, ServerError, ProtocolDetector); Wave 1: F3 (SchemaV2 808r + MapperV2 294r), F1 (DTOV2 1157r, OpenCodeAPIClientV2 422r, CompatibleAPI 212r, BinarySearch, RecentModelsStore), MockServer v1 (665r); Wave 2: F6 completata (PersistStore, WorktreeManager, PermissionAutoResponder, RevertStagingStore — 17/17), F2/F7 file creati ma NON verificati e2e.
-
-## Sessioni 1–5 (30 Lug – 1 Ago 2026) — UI e analisi
-S1: Design System Obsidian Flux + 12 bottoni su API reali + APIClient 999r + AppState + demo HTML. S2: bug fix changeAgent, FaceID, 0 warning. S3: rimozione Design System, stile SwiftUI neutro. S4/S4b/S5: analisi completa app web OpenCode (4 report + ANALISI_COMPLETA_OPENCODE_WEB.md + PIANO_IMPLEMENTAZIONE_IOS.md con 22 gap e fasi F0–F8, stima 12 gg).
+## File modificati
+- `Sources/OpenCodeRemote/Models/SchemaV2.swift` — `SessionInfoV2` custom Decodable per `model` oggetto
+- `Tests/OpenCodeRemoteTests/StressStreamTests.swift` — `testAccumulatorSnapshot1000Parts` aspettativa corretta
+- `.opencode/memory/lessons.md` — aggiornato
+- `.opencode/memory/session-summary.md` — questo file
