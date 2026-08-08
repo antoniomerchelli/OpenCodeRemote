@@ -108,11 +108,17 @@ la richiesta sulla rotta v1.
 
 ## 4. Stato del progetto
 
-**394/394 test verdi**, build macOS OK. Sessioni 18+19 committate e pushate su
-`origin/main`; il lavoro della sessione 22 (fix body model v2/v1, check
-LiveE2E 14-26) è nel working tree, NON committato. **Test definitivo LiveE2E
-27/27** contro il server reale. Il collegamento app → iPhone NON è ancora
-verificato dal vivo.
+**423/423 test verdi** (`swift test`, 37 suite), build macOS OK, **LiveE2E
+27/27** contro il server reale 1.18.15 (rilanciato e verificato il 8 ago 2026,
+exit 0). Tutto committato e pushato su `origin/main` (ultimo commit `12e9cee`,
+F7). Fasi completate del piano `Docs/PIANO_TEST_DEFINITIVO.md`: F0–F3 (fondamenta
++ client v2 + streaming + fixture wire), Fase 1 igiene repo, F4 (MockServer
+40/40 rotte + 27 test integration, commit `20cc13d`), F7 (robustezza: watchdog
+SSE v1, connect timeout, timeout per-funzione v1, race AppState, 2 test wire
+model, commit `12e9cee`). Force-unwrap runtime nel core: 0. In corso: F6 (stress
+sui path F4/F7 — file `StressF6Tests.swift` da creare). Non fatti: F8 (CI +
+view-model), F9 (verifica finale + docs), L4/L5 (Simulator/iPhone — dipende da
+hardware). Il collegamento app → iPhone NON è ancora verificato dal vivo.
 
 ```
 P1 [✅ COMMITTATO]       Fallback automatico v1 per remove/shell/command (commit 026f82c)
@@ -125,8 +131,10 @@ P7 [✅ COMPLETATO]       Wire shell v1 allineato al reale + test
 P8 [✅ COMPLETATO]       Wire command v1 allineato al reale + test
 P9 [✅ COMMITTATO+PUSHATO] Fix sessione 18: Terminal + fallback shell/command wire reale
 P10 [✅ COMPLETATO]      Test definitivo LiveE2E 13/13 + 3 bug wire corretti (sessione 19)
-P11 [⚠️ NON COMMITTATO]  Sessione 22: LiveE2E 27/27, fix body model v2/v1 (id vs modelID),
+P11 [✅ COMMITTATO+PUSHATO] Sessione 22: LiveE2E 27/27, fix body model v2/v1 (id vs modelID),
                         ModelRefV1Body, HTMLFallbackError public, 3 limiti 1.18 documentati
+P12 [✅ COMMITTATO+PUSHATO] F4: MockServer 40/40 rotte client v2 + 27 test integration (20cc13d)
+P13 [✅ COMMITTATO+PUSHATO] F7: robustezza SSE v1 + timeout per-funzione + race AppState (12e9cee)
 ```
 
 ## 5. Modifiche sessione 18 (COMMITTATE E PUSHATE — commit 8338e19, 7f3ca02, 16518c0)
@@ -302,16 +310,31 @@ Passi:
 
 ## 9. Prossimi passi
 
-1. **Test collegamento app → iPhone** (vedi §7): device via USB, trust profilo,
-   collegamento a `http://169.254.31.57:4096`. L'app su iPhone resta l'unico
-   livello non ancora verificato dal vivo (L5).
-2. **Verifica dal vivo** da iPhone: lista sessioni, apertura sessione vecchia
+1. **F6 — Stress sui path F4/F7** (prossimo): creare
+   `Tests/OpenCodeRemoteTests/StressF6Tests.swift` — (a) pty lifecycle:
+   `close()` ripetuti/concorrenti, `send` non connesso → `.invalidResponse`,
+   `connect` verso porta chiusa (127.0.0.1:1) che deve lanciare; (b) revert
+   staging: 200 sessioni stage→clear→stage + stage concorrente stessa sessione
+   (l'actor serializza, ultimo scrittore vince) + commit senza client → false;
+   (c) file list/find: 5000 entry annidate / 10000 risultati. Eviction store
+   GIÀ coperta da `StressStoreTests`. Poi `swift build` + `swift test` + 3x
+   verde consecutivi.
+2. **F8 — CI + view-model**: GitHub Actions (`macos-latest`, `swift build` +
+   `swift test`; LiveE2E opzionale vs mock) + estrazione view-model da
+   `AppState` per chat/terminal/file/settings + test dei view-model.
+3. **F9 — Verifica finale**: build + test + stress 3x + LiveE2E 27/27 + Red
+   Team su tutte le modifiche + smoke mock via `OpenCodeWidgets detect` +
+   aggiornare README.md e Docs/ARCHITETTURA_CORE.md.
+4. **L5 — Test collegamento app → iPhone** (vedi §7): device via USB, trust
+   profilo, collegamento a `http://169.254.31.57:4096`. L'app su iPhone resta
+   l'unico livello non ancora verificato dal vivo.
+5. **Verifica dal vivo** da iPhone: lista sessioni, apertura sessione vecchia
    (merge), invio messaggio (prompt v2), shell dal Terminal, cancellazione
    sessione.
-3. **LiveE2E su iOS Simulator (L4, opzionale)**: build + launch del target
+6. **LiveE2E su iOS Simulator (L4, opzionale)**: build + launch del target
    iOS contro il server reale per coprire il path UI (la CLI copre già
    connessione/logica/wire).
-4. Aggiornare questa HANDOFF con gli esiti del test live.
+7. Aggiornare questa HANDOFF con gli esiti del test live.
 
 ## 10. URL e risorse utili
 
