@@ -107,6 +107,15 @@ public actor PTYClient {
 
         let url = try Self.ptyWebSocketURL(server: server, ptyID: ptyID)
         let task = try await openWebSocket(url: url, ticket: ticket)
+        // Guardia race close()/connect(): `openWebSocket` è un await lungo —
+        // un `close()` arrivato NEL FRATTEMPO ha già chiuso (isClosed=true) e
+        // il task appena aperto NON deve riaprire la connessione. Senza questa
+        // guardia la riassegnazione di `websocketTask` + `isClosed = false`
+        // riaprirebbe il socket dopo la chiusura esplicita dell'utente.
+        if isClosed {
+            task.cancel()
+            throw ServerError(kind: .cancelled, message: "Chiuso durante la connessione")
+        }
         self.websocketTask = task
 
         let (stream, continuation) = AsyncThrowingStream<PTYOutput, Error>.makeStream()
