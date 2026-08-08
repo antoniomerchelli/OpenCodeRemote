@@ -1,13 +1,12 @@
 # Session Summary — OpenCode Remote
 
 ## Stato attuale
-**Sessione 24 (8 Ago 2026) — F7 COMPLETATA: robustezza SSE v1 + timeout per-funzione + race AppState**. `V1SSEClient` ora ha watchdog idle (60s, stream muto → errore → reconnect del caller), connect timeout 10s contro IP black-hole, fix bug latente (risposta non-2xx saltava `finishSSEStream` → continuation appesa); watchdog per-generazione (`V1SSEConnectionBox`) che cancella solo il task della propria connect(); `lastActivity`/`watchdogFired` resettati a ogni generazione; errori di trasporto reali propagati (non mascherati da timeout). Timeout v1 per-funzione: `request`/`authenticatedRequest` accettano `timeout:` — `executeShell`, `sendMessage`, `sendMessageAsync` usano `apiTurnTimeoutMS` (5min). Race AppState: `deferredBootstrap` con guard generazione dopo le await lunghe e nel catch (niente store orfani né `connectionError` stantio dopo disconnectV2); `defer` sblocca `loadingSessions` solo se la generazione non è cambiata. **2 test wire nuovi** (shell/command v2 codificano `model.id`/`providerID`, mai `modelID`). Red Team F7: 0 critici, 4 attenzioni tutte fixate. **`swift test` 423/423 verdi (37 suite), LiveE2E 27/27 vs server reale, force-unwrap core = 0.** Commit: `12e9cee` (F7) e `20cc13d` (F4) pushati su main. F6 (stress path nuovi) impostato ma NON scritto: il file `StressF6Tests.swift` non è stato creato — il piano dei test era pronto (pty lifecycle/close concorrenti, revert staging 200 sessioni + stage concorrente, file list 5000 entry / find 10000 risultati; eviction già coperta da StressStoreTests).
+**Sessione 25 (8 Ago 2026) — F6 COMPLETATA: stress pty lifecycle + revert staging + file list/find; F7 e F4 CHIUSE (100%)**. Creato `Tests/OpenCodeRemoteTests/StressF6Tests.swift` con **12 test** (5 PTY lifecycle, 4 revert staging, 3 file list/find — 436 totali). La fase A ha chiuso il residuo F7: `testCommand_whenModelSpecified_shouldFallbackBodyUseModelAsString` + assert `model["id"] == nil` nel fallback v1 shell (chiavi speculari v2 `id`/v1 `modelID`). **Red Team round 1**: 4 [ATTENZIONE] → **fix produzione**: guardia `if isClosed` in `PTYClient.connect` dopo `openWebSocket` (un `close()` nel frattempo non riapre il socket; senza, riassegnazione `websocketTask` + `isClosed=false` riaprivano dopo chiusura esplicita). **Red Team round 2: APPROVED** — 12/12 F6 verdi, zero allucinazioni API, zero `try!`, assert tutti nel corpo del test (mai dentro `Task{}`/`responseHandler`: `XCTestCase.current` è thread-local), `LockedRequestRecorder`/`LockedCounter` thread-safe con NSLock. **3x `swift test` 436/436 verdi (38 suite), LiveE2E 27/27, force-unwrap core = 0.** Commit pushati: `0afb550` (F7 residuo), `bf71383` (F6 stress), `9acb6ca` (fix Red Team), `9441856` (fix pty race), `35d3346` (docs piano), `70b54a2` (AGENTS.md metriche). Checklist piano: Fasi 1/3/4 spuntate, Fase 2 (F4) chiusa in S24.
 
 ## Prossimi passi consigliati
-1. **F6** — Creare `Tests/OpenCodeRemoteTests/StressF6Tests.swift` (3 test, piano già definito: pty lifecycle close/send-non-connesso/connect-porta-chiusa; revert staging 200 sessioni + stage concorrente; fileList 5000 entry annidate + fileFind 10000 risultati) → `swift build` + `swift test` → 3x verde → commit
-2. **F8** — CI GitHub Actions (`macos-latest`, `swift build` + `swift test`, LiveE2E opzionale vs mock) + view-model extraction (AppState → view-model chat/terminal/file/settings) + test per i view-model
-3. **F9** — Verifica finale multi-livello + Red Team su tutte le modifiche + aggiornare `HANDOFF_NEXT_AI.md`, `README.md`, `Docs/ARCHITETTURA_CORE.md`
-4. **L5** — iPhone via USB (sbloccato quando device disponibile; link-local 169.254.x.x, trust profilo)
+1. **F8** — CI GitHub Actions (`macos-latest`, `swift build` + `swift test`, LiveE2E opzionale vs mock) + view-model extraction (AppState → view-model chat/terminal/file/settings) + test per i view-model
+2. **F9** — Verifica finale multi-livello + Red Team su tutte le modifiche + aggiornare `HANDOFF_NEXT_AI.md` (fatto parzialmente in S25), `README.md` (ancora "29 test" — obsoleto), `Docs/ARCHITETTURA_CORE.md` (fermo al 2 ago)
+3. **L5** — iPhone via USB (sbloccato quando device disponibile; link-local 169.254.x.x, trust profilo)
 
 ## Problemi aperti / blocchi
 - L5: device iPhone non connesso (hardware) — ultimo 2% del piano
@@ -17,9 +16,9 @@
 - La delega a subagent general può fallire silenziosamente (task F7: agente ha restituito solo un riepilogo senza fare lavoro) → verificare SEMPRE il risultato con `ls`/build, come per session-scribe
 
 ## Note d'ambiente
-- **Server**: `opencode serve --port 4096 --hostname 0.0.0.0` (1.18.15) — attivo e healthy; LiveE2E rilanciato in questa sessione: 27/27, exit 0
-- **Test**: `swift test` 423/423 (37 suite); suite stress: StressStore (9) + StressStream (10) + StressModels (55) = 74
-- **Git**: `12e9cee` F7, `20cc13d` F4 — tutto su origin/main, working tree pulito
+- **Server**: `opencode serve --port 4096 --hostname 0.0.0.0` (1.18.15) — attivo e healthy; LiveE2E rilanciato in sessione 25: 27/27, exit 0
+- **Test**: `swift test` 436/436 (38 suite); suite stress: StressStore (9) + StressStream (10) + StressModels (55) + StressF6 (12) = 86
+- **Git**: `0afb550` F7, `bf71383` F6, `9acb6ca` fix Red Team, `9441856` fix pty race, `35d3346` docs, `70b54a2` AGENTS.md — tutto su origin/main, working tree pulito
 - **Data-race checks**: già attivi su tutti i target via `unsafeFlags` in Package.swift — NON aggiungerli
 - **Wire 1.18.15 confermato**: model v2 `{id, providerID}` vs v1 `{providerID, modelID}` (chiavi speculari); messageList ordine DESCENDENTE; errori v2 `{_tag, message}` top-level / v1 `{name, data:{message, kind}}`
 - **Regola build**: mai due `swift build`/`swift test` in parallelo sullo stesso package
@@ -62,3 +61,19 @@
 **Decisioni prese:**
 - Il mock NON è importabile dai test: i fixture JSON replicati nel test come costanti (pattern consolidato) + smoke curl per la verifica end-to-end
 - Error path con sessioni "riservate" deterministiche (`missing`, `busy`, `ghost-session`, `ghost-rule`) invece di stato completo
+
+---
+
+## Sessione 25 (8 ago 2026) — F6 stress ampliato + chiusura F7 residuo + fix race PTY
+
+**Fatto:**
+- **F7 residuo chiuso (Fase A)**: `testCommand_whenModelSpecified_shouldFallbackBodyUseModelAsString` (il fallback v1 command deve codificare `modelID` come STRINGA nel body, non `{id, providerID}`) + assert `model["id"] == nil` in `testShell_whenModelSpecified_shouldEncodeModelAsID` (v2 `{id, providerID}` / v1 `{providerID, modelID}` — chiavi speculari, lezione wire)
+- **F6 stress (Fase B)**: `StressF6Tests.swift` 12 test: PTY lifecycle (close×10 idempotente, 20 close concorrenti su actor, send non-connesso, connect porta chiusa 127.0.0.1:1 senza hang, close durante connect); revert staging (200 stage/clear sequenziali, 20 stage concorrenti ultimo-scrittore-vince, commit 200 senza client, commit 200 con client mockato); file list/find (5000 entry annidate decode end-to-end, 10000 risultati, envelope `{files:[...]}` wire reale)
+- **Red Team round 1**: 4 [ATTENZIONE]: (1) assert dentro `Task{}` non attribuiti al test (`XCTestCase.current` thread-local) — fix: catturare errore in variabile, assert nel corpo dopo `await connectTask.value`; (2) assert dentro `responseHandler` — fix: `LockedRequestRecorder`/`LockedCounter` thread-safe NSLock, verifica nel corpo; (3) connect porta chiusa: accettare anche `.timeout` (firewall che droppa) + `URLSession` ephemeral — il vecchio assert "mai timeout" era un risk flaky; (4) **fix produzione**: race `close()`/`connect()` in `PTYClient` — guardia `if isClosed { task.cancel(); throw .cancelled }` dopo `openWebSocket` (await lungo), prima di riassegnare `websocketTask`/`isClosed=false`
+- **Red Team round 2**: APPROVED — 12/12 F6 verdi, zero allucinazioni API, zero `try!`, handler puliti (verificato con regex su tutti i blocchi), fix produzione confermato corretto
+- **Verifiche**: `swift build` OK; `swift test` 436/436 ×3 consecutivi; LiveE2E 27/27 vs server reale (exit 0)
+- **Commit pushati**: `0afb550` (F7 residuo), `bf71383` (F6), `9acb6ca` (fix Red Team test), `9441856` (fix pty race), `35d3346` (docs piano+checklist), `70b54a2` (AGENTS.md metriche 436/86)
+
+**Decisioni prese:**
+- Stress F6: pty concorrenza su actor (serializzazione garantita, invarianti last-writer-wins), connettività reale solo loopback porta chiusa (mai rete esterna nei test), timing assert solo come guardia anti-hang con bound larghissimo (30s per 5000 nodi)
+- Il rischio wire model v2/v1 resta CHIUSO PER DOCUMENTAZIONE: da riverificare su un server che implementa davvero la v2 (criterio in `Docs/IMPLEMENTATION_PLAN_F6_F7.md` §6.3)
