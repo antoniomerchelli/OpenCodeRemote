@@ -41,14 +41,14 @@ NON usare i documenti storici a root (obsoleti).
 ### Fase 2 — F4: Integration MockServer completa (happy + error)
 **Deliverable:** ogni rotta del client v2 ha una controparte mock con happy path
 e almeno un error path; test di integrazione per ciascuna.
-- [ ] Gap analysis finale rotte client v2 vs mock (deep-researcher)
-- [ ] Rotte mancanti da aggiungere al mock (~12, da confermare):
+- [x] Gap analysis finale rotte client v2 vs mock (deep-researcher)
+- [x] Rotte mancanti da aggiungere al mock (~12, da confermare):
   `compact`, `wait`, `context`, `fork`, `summarize`, `share`, `unshare`,
   `modelDefault`, `providerGet`, `permissionSaved`/`permissionRemoveSaved`,
   `fileList`, `fileFind`
-- [ ] Error path: 404 sessione/pty inesistente, 400 body invalido, HTML fallback
-- [ ] Test di integrazione per ogni rotta nuova (mock + client reale)
-- [ ] `swift test` verde
+- [x] Error path: 404 sessione/pty inesistente, 400 body invalido, HTML fallback
+- [x] Test di integrazione per ogni rotta nuova (mock + client reale)
+- [x] `swift test` verde (421: 394 + 27 nuovi F4)
 - **Vincoli wire F3 da rispettare:** history = eventi (non messaggi), `cost`
   array, raw non cattura chiavi extra, `prompt` è oggetto `{text}`,
   `model` chiavi speculari v2 `{id, providerID}` vs v1 `{providerID, modelID}`,
@@ -104,9 +104,9 @@ e almeno un error path; test di integrazione per ciascuna.
 
 | Metrica | Attuale | Target |
 |---|---|---|
-| Test unitari `swift test` | 394 | 394 + nuovi (F4/F6/F8) |
+| Test unitari `swift test` | 421 | 394 + nuovi (F4/F6/F8) |
 | Check LiveE2E vs server reale | 27/27 | 27/27 invariato (o più) |
-| Rotte mock | ~28 | tutte quelle del client v2 (~40) |
+| Rotte mock | ~40 (tutte v2 client) | tutte quelle del client v2 (~40) |
 | Stress 3x | 3/3 | 3/3 (suite ampliata) |
 | CI | assente | verde su push |
 | Force-unwrap runtime | 0 | 0 |

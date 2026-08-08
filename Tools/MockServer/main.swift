@@ -375,13 +375,22 @@ final class MockServer {
     }
 
     func providersJSON() -> [[String: Any]] {
+        // FIX F4: `ProviderV2.models` è `[ModelV2]` (OBIETTI con `id`), non
+        // array di stringhe: con le stringhe il decode leniente azzera `models`.
         [
             ["id": "openai", "name": "OpenAI", "displayName": "OpenAI", "isConnected": true,
-             "authMethods": ["api_key"], "models": ["gpt-4o", "gpt-4o-mini"]],
+             "authMethods": ["api_key"], "models": [
+                ["id": "gpt-4o", "providerID": "openai", "name": "gpt-4o"],
+                ["id": "gpt-4o-mini", "providerID": "openai", "name": "gpt-4o-mini"],
+             ]],
             ["id": "anthropic", "name": "Anthropic", "displayName": "Anthropic", "isConnected": true,
-             "authMethods": ["api_key"], "models": ["claude-sonnet-4-5"]],
+             "authMethods": ["api_key"], "models": [
+                ["id": "claude-sonnet-4-5", "providerID": "anthropic", "name": "claude-sonnet-4-5"],
+             ]],
             ["id": "deepseek", "name": "DeepSeek", "displayName": "DeepSeek", "isConnected": false,
-             "authMethods": ["api_key"], "models": ["deepseek-v4-flash-free"]],
+             "authMethods": ["api_key"], "models": [
+                ["id": "deepseek-v4-flash-free", "providerID": "deepseek", "name": "deepseek-v4-flash-free"],
+             ]],
         ]
     }
 
@@ -405,11 +414,102 @@ final class MockServer {
         ]
     }
 
+    /// Messaggio singolo per `GET /api/session/:id/message/:messageID`
+    /// (`MessageV2DTO`). `time.created` è in millisecondi numerici come il
+    /// wire reale 1.18 (il decoder custom del client li accetta).
+    func singleMessageJSON(id: String, messageID: String) -> [String: Any] {
+        [
+            "id": messageID,
+            "sessionID": id,
+            "type": "assistant",
+            "time": ["created": Int(Date().timeIntervalSince1970 * 1000)],
+            "content": [["type": "text", "text": "Mock risposta per \(messageID)"]],
+        ]
+    }
+
+    /// File per `GET /api/file` (array nudo `[FileEntryV2]`): `path` è
+    /// OBBLIGATORIO per il decoder; `modifiedAt` è ISO8601.
+    func fileListJSON() -> [[String: Any]] {
+        let iso = ISO8601DateFormatter().string(from: Date())
+        return [
+            [
+                "name": "main.swift",
+                "path": "/tmp/mock/main.swift",
+                "type": "file",
+                "size": 123,
+                "modifiedAt": iso,
+            ],
+            [
+                "name": "src",
+                "path": "/tmp/mock/src",
+                "type": "directory",
+                "size": 0,
+                "modifiedAt": iso,
+            ],
+        ]
+    }
+
+    /// File per `GET /api/file/find` (array nudo di stringhe path).
+    func fileFindJSON() -> [String] {
+        ["a.swift", "b.swift"]
+    }
+
+    /// Body errore v2 (wire reale 1.18): `{"_tag", "message"}` con il messaggio
+    /// a livello TOP. I tag riconosciuti dal client sono `SessionNotFoundError`,
+    /// `ConfigInvalidError`, `ProviderModelNotFoundError`, `MessageNotFoundError`.
+    private func v2ErrorJSON(tag: String, message: String) -> [String: Any] {
+        ["_tag": tag, "message": message]
+    }
+
+    /// Body errore v1 (wire reale 1.18): `{"name", "data": {"message", "kind"}}`.
+    private func v1ErrorJSON(name: String, message: String, kind: String) -> [String: Any] {
+        ["name": name, "data": ["message": message, "kind": kind]]
+    }
+
+    // MARK: - Stato sessioni (error path deterministici)
+
+    /// Id "inesistenti": il mock non tiene lo stato completo delle sessioni,
+    /// quindi il 404 di risorsa si triggera su id riservati e deterministici.
+    private static let missingSessionIDs: Set<String> = ["missing", "ghost-session"]
+    /// Id "busy" per i 503 di compact/wait/summarize e i 500 v1 di shell/command.
+    private static let busySessionIDs: Set<String> = ["busy"]
+    /// Id delle regole di permesso salvate note (DELETE 200); altri → 404.
+    private static let savedPermissionRuleIDs: Set<String> = ["req-1"]
+
+    private func sessionExists(_ id: String) -> Bool {
+        !Self.missingSessionIDs.contains(id)
+    }
+
+    private func isBusy(_ id: String) -> Bool {
+        Self.busySessionIDs.contains(id)
+    }
+
+    // MARK: - HTML fallback simulato (X-Mock-HTML-Fallback)
+
+    /// Rotte su cui simulare la risposta SPA HTML del server reale 1.18 per le
+    /// rotte v2 inesistenti (fallback v1 / `HTMLFallbackError`). Configurabile
+    /// con l'header sentinella `X-Mock-HTML-Fallback: <rotte-comma-separated>`
+    /// (es. `shell,command,remove,rename,pty`).
+    private func htmlFallbackRoutes(_ request: HTTPRequest) -> Set<String> {
+        let header = request.headers["x-mock-html-fallback"] ?? ""
+        return Set(header.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+    }
+
+    /// Risponde 200 con body che inizia con `<!doctype html>` (il client rileva
+    /// l'HTML nei primi 512 byte → `HTMLFallbackError` / fallback v1).
+    private func respondHTMLFallback(_ connection: ClientConnection) {
+        let html = "<!doctype html><html lang=\"it\"><head><title>opencode</title></head><body><div id=\"root\">SPA fallback</div></body></html>"
+        connection.respond(status: 200, contentType: "text/html", body: Data(html.utf8))
+    }
+
     // MARK: - Routing
 
     func route(_ request: HTTPRequest, connection: ClientConnection) {
         let segments = request.path.split(separator: "/").map(String.init)
         let method = request.method
+        // Rotte configurate per rispondere con la SPA HTML (fallback v1):
+        // lette dall'header sentinella `X-Mock-HTML-Fallback`.
+        let htmlFallback = htmlFallbackRoutes(request)
 
         // Rotte con path interamente costante.
         switch (method, segments) {
@@ -450,6 +550,15 @@ final class MockServer {
             }
             registeredSessions.insert(id)
             connection.respondJSON(status: 201, object: sessionV2JSON(id: id)); return
+        case ("GET", ["api", "model", "default"]):
+            // Modello di default (`modelDefault`). La query `directory` è
+            // ignorata (il mock non ha directory). Body VUOTO `{}` = nessun
+            // default (nil, NON errore): si attiva con `directory=none`
+            // (sentinella per testare il caso "default assente").
+            if request.query["directory"] == "none" {
+                connection.respondJSON(status: 200, object: [:]); return
+            }
+            connection.respondJSON(status: 200, object: ["providerID": "openai", "modelID": "gpt-4o"]); return
         case ("GET", ["api", "model"]):
             // Il client decodifica [ModelV2] nudo: niente wrapper {data: ...}.
             connection.respondJSON(status: 200, jsonArray: modelsJSON()); return
@@ -473,6 +582,15 @@ final class MockServer {
             break
         }
 
+        // Rotte parametriche v2: /api/provider/:id (provider singolo).
+        if method == "GET", segments.count == 3, segments[0] == "api", segments[1] == "provider" {
+            let providerID = segments[2]
+            guard let provider = providersJSON().first(where: { ($0["id"] as? String) == providerID }) else {
+                connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "ProviderModelNotFoundError", message: "Provider not found: \(providerID)")); return
+            }
+            connection.respondJSON(status: 200, object: provider); return
+        }
+
         // Rotte parametriche v2: /api/session/:id[/:action]
         if segments.count >= 3, segments[0] == "api", segments[1] == "session" {
             let id = segments[2]
@@ -488,6 +606,11 @@ final class MockServer {
                 }
                 connection.respondJSON(status: 200, object: sessionV2JSON(id: id)); return
             case ("DELETE", 3, nil):
+                // Fallback v1 `DELETE /session/:id` quando il server reale
+                // risponde la SPA HTML sulla rotta v2 (header sentinella).
+                if htmlFallback.contains("remove") {
+                    respondHTMLFallback(connection); return
+                }
                 sessionOverrides.removeValue(forKey: id)
                 registeredSessions.remove(id)
                 connection.respondJSON(status: 200, object: ["ok": true]); return
@@ -527,6 +650,10 @@ final class MockServer {
                 broadcastSSE(sessionID: id, block: "event: session.aborted\ndata: {\"sessionId\":\(jsonString(id))}\nid: \(nextEventID(sessionID: id))\n\n")
                 connection.respondJSON(status: 200, object: ["ok": true]); return
             case ("POST", 4, "rename"):
+                // Sul server reale 1.18 la rotta rename NON esiste → SPA HTML.
+                if htmlFallback.contains("rename") {
+                    respondHTMLFallback(connection); return
+                }
                 // Wire reale: risponde la sessione aggiornata (SessionV2Info).
                 // Il client (OpenCodeAPIClientV2.rename) decodifica
                 // SessionV2Info? → `{"ok": true}` non è decodificabile. Persiste
@@ -538,9 +665,18 @@ final class MockServer {
                 }
                 connection.respondJSON(status: 200, object: sessionV2JSON(id: id)); return
             case ("POST", 4, "shell"):
+                // Fallback v1 `POST /session/:id/shell` quando la rotta v2
+                // manca sul server reale (header sentinella → SPA HTML).
+                if htmlFallback.contains("shell") {
+                    respondHTMLFallback(connection); return
+                }
                 let command = (request.bodyJSONObject()?["command"] as? String) ?? ""
                 connection.respondJSON(status: 200, object: shellMessageJSON(kind: "shell", command: command)); return
             case ("POST", 4, "command"):
+                // Fallback v1 `POST /session/:id/command` (SPA HTML).
+                if htmlFallback.contains("command") {
+                    respondHTMLFallback(connection); return
+                }
                 let command = (request.bodyJSONObject()?["command"] as? String) ?? ""
                 connection.respondJSON(status: 200, object: shellMessageJSON(kind: "command", command: command)); return
             case ("GET", 4, "event"):
@@ -558,9 +694,73 @@ final class MockServer {
                 if let limit = request.query["limit"] { payload["limit"] = limit }
                 let data = jsonData(payload)
                 connection.respond(status: 200, contentType: "application/json", body: data, extraHeaders: ["x-next-cursor": "cur-2"]); return
+            case ("POST", 4, "compact"):
+                guard sessionExists(id) else {
+                    connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "SessionNotFoundError", message: "Session not found: \(id)")); return
+                }
+                if isBusy(id) {
+                    connection.respondJSON(status: 503, object: v2ErrorJSON(tag: "SessionBusyError", message: "sessione busy")); return
+                }
+                // performNoContent decodifica comunque il body: `{}` valido.
+                connection.respondJSON(status: 200, object: [:]); return
+            case ("POST", 4, "wait"):
+                guard sessionExists(id) else {
+                    connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "SessionNotFoundError", message: "Session not found: \(id)")); return
+                }
+                if isBusy(id) {
+                    connection.respondJSON(status: 503, object: v2ErrorJSON(tag: "SessionBusyError", message: "sessione busy")); return
+                }
+                connection.respondJSON(status: 200, object: [:]); return
+            case ("GET", 4, "context"):
+                guard sessionExists(id) else {
+                    connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "SessionNotFoundError", message: "Session not found: \(id)")); return
+                }
+                // SessionContextV2 preserva tutto in `raw` (payload libero).
+                connection.respondJSON(status: 200, object: ["sessionID": id, "files": ["a.swift"]]); return
+            case ("POST", 4, "fork"):
+                guard sessionExists(id) else {
+                    connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "SessionNotFoundError", message: "Session not found: \(id)")); return
+                }
+                // Body `{messageID}`; risponde la sessione forkata (SessionV2Info).
+                let newID = nextSessionID()
+                log("[EVT] fork \(id) → \(newID)")
+                connection.respondJSON(status: 200, object: sessionV2JSON(id: newID)); return
+            case ("POST", 4, "summarize"):
+                guard sessionExists(id) else {
+                    connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "SessionNotFoundError", message: "Session not found: \(id)")); return
+                }
+                if isBusy(id) {
+                    connection.respondJSON(status: 503, object: v2ErrorJSON(tag: "SessionBusyError", message: "sessione busy")); return
+                }
+                connection.respondJSON(status: 200, object: ["summary": "Riepilogo mock della sessione"]); return
+            case ("POST", 4, "share"):
+                guard sessionExists(id) else {
+                    connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "SessionNotFoundError", message: "Session not found: \(id)")); return
+                }
+                // ShareResultV2 decodifica `url` (oppure `shareUrl`/`link`).
+                connection.respondJSON(status: 200, object: ["url": "https://opencode.dev/share/mock-share-token"]); return
+            case ("DELETE", 4, "share"):
+                guard sessionExists(id) else {
+                    connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "SessionNotFoundError", message: "Session not found: \(id)")); return
+                }
+                connection.respondJSON(status: 200, object: [:]); return
             default:
                 break
             }
+        }
+
+        // Rotte parametriche v2: /api/session/:id/message/:messageID (singolo)
+        if method == "GET", segments.count == 5,
+           segments[0] == "api", segments[1] == "session", segments[3] == "message" {
+            let id = segments[2]
+            let messageID = segments[4]
+            guard sessionExists(id) else {
+                connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "SessionNotFoundError", message: "Session not found: \(id)")); return
+            }
+            guard messageID != "missing" else {
+                connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "MessageNotFoundError", message: "Message not found: \(messageID)")); return
+            }
+            connection.respondJSON(status: 200, object: singleMessageJSON(id: id, messageID: messageID)); return
         }
 
         // Rotte parametriche v2: /api/session/:id/revert/{stage,clear,commit}
@@ -593,6 +793,11 @@ final class MockServer {
 
         // Rotte parametriche v2: /api/pty[/:id]
         if segments.count >= 2, segments[0] == "api", segments[1] == "pty" {
+            // Sul server reale 1.18 PATCH /api/pty/:id (resize) NON esiste →
+            // SPA HTML. L'header sentinella estende la SPA a tutte le rotte pty.
+            if htmlFallback.contains("pty") {
+                respondHTMLFallback(connection); return
+            }
             switch (method, segments.count) {
             case ("GET", 2):
                 // Il client decodifica `[PTYV2]`: array nudo, non `{items: ...}`.
@@ -644,6 +849,50 @@ final class MockServer {
             connection.respondJSON(status: 200, object: echoBody(request)); return
         }
 
+        // Rotte parametriche v2: /api/permission/saved[/:id]
+        if segments.count >= 3, segments[0] == "api", segments[1] == "permission", segments[2] == "saved" {
+            switch (method, segments.count) {
+            case ("GET", 3):
+                // Regole di permesso salvate: array nudo `[PermissionRequestV2]`.
+                connection.respondJSON(status: 200, jsonArray: permissionRequestJSON()); return
+            case ("DELETE", 4):
+                let ruleID = segments[3]
+                // Regola nota → 200 `{}`; regola sconosciuta → 404.
+                guard Self.savedPermissionRuleIDs.contains(ruleID) else {
+                    connection.respondJSON(status: 404, object: v2ErrorJSON(tag: "MessageNotFoundError", message: "Saved permission not found: \(ruleID)")); return
+                }
+                log("[PERM] saved rule removed \(ruleID)")
+                connection.respondJSON(status: 200, object: [:]); return
+            default:
+                break
+            }
+        }
+
+        // Rotte parametriche v2: /api/file[/:action]
+        if segments.count >= 2, segments[0] == "api", segments[1] == "file" {
+            let action = segments.count >= 3 ? segments[2] : nil
+            switch (method, segments.count, action) {
+            case ("GET", 2, nil):
+                // GET /api/file — lista file. Query: directory, path, dirs, search.
+                // `dirs` accetta solo "true"|"false" (400 altrimenti).
+                if let dirs = request.query["dirs"], dirs != "true", dirs != "false" {
+                    connection.respondJSON(status: 400, object: v2ErrorJSON(tag: "InvalidRequestError", message: "Expected dirs to be \"true\" or \"false\", got \"\(dirs)\"")); return
+                }
+                connection.respondJSON(status: 200, jsonArray: fileListJSON()); return
+            case ("GET", 3, "find"):
+                // GET /api/file/find — ricerca per nome (PRIMA di eventuali
+                // rotte `/api/file/:path`). Query `query` OBBLIGATORIA (400).
+                let query = request.query["query"]
+                guard let query, !query.isEmpty else {
+                    connection.respondJSON(status: 400, object: v2ErrorJSON(tag: "InvalidRequestError", message: "Missing key [query]")); return
+                }
+                log("[FILE] find query=\(query)")
+                connection.respondJSON(status: 200, jsonArray: fileFindJSON()); return
+            default:
+                break
+            }
+        }
+
         // Rotte parametriche v2: /api/question/request/:id/reply|reject
         if method == "POST", segments.count == 5,
            segments[0] == "api", segments[1] == "question", segments[2] == "request",
@@ -666,6 +915,19 @@ final class MockServer {
             streamDemo(connection: connection, sessionID: segments[1], after: request.query["after"], scenario: config.scenario); return
         }
 
+        // Rotte v1 di FALLBACK (usate dal client quando la rotta v2 risponde
+        // la SPA HTML): DELETE /session/:id (remove), POST /session/:id/shell,
+        // POST /session/:id/command.
+        if method == "DELETE", segments.count == 2, segments[0] == "session" {
+            connection.respondJSON(status: 200, object: [:]); return
+        }
+        if method == "POST", segments.count == 3, segments[0] == "session", segments[2] == "shell" {
+            handleV1Shell(connection, id: segments[1], request: request); return
+        }
+        if method == "POST", segments.count == 3, segments[0] == "session", segments[2] == "command" {
+            handleV1Command(connection, id: segments[1], request: request); return
+        }
+
         connection.respondJSON(status: 404, object: ["error": "not found"])
     }
 
@@ -681,6 +943,63 @@ final class MockServer {
             return result
         }
         return ["ok": true, "echo": request.bodyString ?? ""]
+    }
+
+    /// Fallback v1 `POST /session/:id/shell`. Wire reale 1.18: body
+    /// `{command, agent, model: {providerID, modelID}}` — `agent` OBBLIGATORIO
+    /// (400 `Missing key ["agent"]`); risposta `{info, parts}` con l'output nel
+    /// part `tool` → `state.output` a livello TOP.
+    private func handleV1Shell(_ connection: ClientConnection, id: String, request: HTTPRequest) {
+        let body = request.bodyJSONObject() ?? [:]
+        guard let agent = body["agent"] as? String, !agent.isEmpty else {
+            connection.respondJSON(status: 400, object: v1ErrorJSON(name: "ValidationError", message: "Missing key [\"agent\"]", kind: "Validation")); return
+        }
+        if let model = body["model"] as? [String: Any] {
+            guard (model["providerID"] as? String) != nil, (model["modelID"] as? String) != nil else {
+                connection.respondJSON(status: 400, object: v1ErrorJSON(name: "ValidationError", message: "Missing key [\"model\"][\"modelID\"]", kind: "Validation")); return
+            }
+        }
+        if isBusy(id) {
+            connection.respondJSON(status: 500, object: v1ErrorJSON(name: "UnknownError", message: "Session is busy", kind: "Unknown")); return
+        }
+        let command = (body["command"] as? String) ?? ""
+        let output = command.isEmpty
+            ? "Mock shell executed"
+            : "Mock shell output for `\(command)`"
+        log("[V1] shell for \(id) agent=\(agent)")
+        connection.respondJSON(status: 200, object: [
+            "info": ["id": "msg-shell-1", "sessionID": id, "role": "assistant"],
+            "parts": [
+                ["type": "tool", "tool": "bash", "state": ["status": "completed", "output": output]],
+            ],
+        ]); return
+    }
+
+    /// Fallback v1 `POST /session/:id/command`. Wire reale 1.18: body
+    /// `{messageID, agent, model: String?, command, arguments}` con `arguments`
+    /// SEMPRE presente (stringa, NON array → 400 `Missing key at ["arguments"]`);
+    /// risposta `{info, parts}` con le parti text a livello TOP.
+    private func handleV1Command(_ connection: ClientConnection, id: String, request: HTTPRequest) {
+        let body = request.bodyJSONObject() ?? [:]
+        guard body["arguments"] != nil else {
+            connection.respondJSON(status: 400, object: v1ErrorJSON(name: "ValidationError", message: "Missing key at [\"arguments\"]", kind: "Validation")); return
+        }
+        if isBusy(id) {
+            connection.respondJSON(status: 500, object: v1ErrorJSON(name: "UnknownError", message: "Session is busy", kind: "Unknown")); return
+        }
+        let command = (body["command"] as? String) ?? ""
+        let text = command.isEmpty
+            ? "Mock command executed"
+            : "Mock output for /\(command)"
+        log("[V1] command for \(id) command=\(command)")
+        connection.respondJSON(status: 200, object: [
+            "info": ["id": "msg-command-1", "sessionID": id, "role": "assistant"],
+            "parts": [
+                ["type": "step-start"],
+                ["type": "text", "text": text],
+                ["type": "step-finish"],
+            ],
+        ]); return
     }
 
     // MARK: - PTY REST state

@@ -1,5 +1,17 @@
 # OpenCode Remote — Lezioni apprese
 
+## Sessione 23 (8 Ago 2026) — F4: MockServer 40/40 rotte v2 + 27 test integration
+
+1. **`ProviderV2.models` sul wire (providers.list/get) è un array di OGGETTI `ModelV2` `{id, providerID, ...}`, NON di stringhe**: il mock serviva `["gpt-4o", ...]` e il decode leniente `(try? decodeIfPresent([ModelV2].self)) ?? []` falliva silenziosamente → `models` sempre vuota in `providerList()`. Il mock e il fixture di test erano "d'accordo" su una forma sbagliata: nessun test l'ha notato finché non si è asserito `models.count`. Fix in entrambi (mock + fixture).
+2. **Il conteggio dei segmenti del path nel mock va verificato dal vivo**: `DELETE /api/permission/saved/:id` era `case ("DELETE", 5)` + `segments[4]` ma `/api/permission/saved/req-1` ha **4 segmenti** → il case non matchava MAI (404 di default). Il test client passava (MockURLProtocol non tocca il router del mock) → il bug è emerso solo con `curl` sul mock live. Lezione: i test con `MockURLProtocol` verificano il client, NON le rotte del mock; dopo modifiche al mock, smoke curl di ogni rotta.
+3. **`SessionBusyError` (503) NON è mappato in `ServerError.fromResponse`**: `_tag` sconosciuto + status 5xx → `kind = .http` (retryable). Giusto così per il retry, ma nei test va asserito `.http` + `isRetryable`, non `.api`/`.sessionNotFound`.
+4. **Sentinelle deterministiche per error path nel mock**: invece di tenere lo stato completo delle sessioni, id riservati (`missing`, `ghost-session` → 404; `busy` → 503; `ghost-rule` → 404 DELETE saved; `missing` come messageID → 404) rendono gli error path riproducibili e testabili.
+5. **`X-Mock-HTML-Fallback: <rotte>`**: header sentinella per simulare la SPA HTML del server reale 1.18 su rotte v2 inesistenti (remove/rename/shell/command/pty). Consente di testare il fallback v1 del client senza un server "broken" dedicato. Rotte v1 di fallback aggiunte: `DELETE /session/:id`, `POST /session/:id/shell` (agent obbligatorio, `{info, parts}` con output nel part tool → top-level), `POST /session/:id/command` (arguments obbligatorio).
+6. **`ModelDefaultV2` con body `{}`** (`directory=none` nel mock): non è un errore ma "default assente" → decodifica leniente con campi nil, NON throw. `modelDefault` usa `performOptional` ma senza `emptyAsNil`: `{}` decodifica come oggetto vuoto valido.
+7. **`FileFindV2` accetta sia array nudo `["a.swift"]` sia `{files: [...]}`** (singleValueContainer fallback): il mock serve array nudo, il wire reale `{files}` — entrambi coperti.
+8. **`MessageV2DTO.time` numerico in ms decodifica con il `dateDecodingStrategy` custom del client** (ms → Date via `/1000`): la fixture del messaggio singolo può usare `Int(Date().timeIntervalSince1970 * 1000)` come il mock.
+9. **`ShareResultV2` accetta `url`/`shareUrl`/`link`**: il mock serve `{url}`, ma la forma alternativa va testata (il wire può variare).
+
 ## Sessione 22 (8 Ago 2026) — LiveE2E 27/27: ordine messageList, model id vs modelID, rename/PATCH-pty assenti
 
 1. **`GET /api/session/:id/message` (v2 reale) ritorna i messaggi in ordine DESCENDENTE** (assistant del turno PRIMA dello user; `list.messages.last` = user, senza `time.completed`). Il poll "turno completo" che usava `.last` non scattava MAI → timeout 180s anche a turno concluso (la persistenza confermava 1 user + 1 assistant). Fix: cercare `first(where: { $0.type == "assistant" && $0.time?.completed != nil })` — robusto a ogni ordinamento. Non assumere mai l'ordine di messageList: verificarlo dal vivo.

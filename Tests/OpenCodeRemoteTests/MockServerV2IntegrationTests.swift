@@ -125,18 +125,23 @@ final class MockServerV2IntegrationTests: XCTestCase {
         ],
     ]
 
-    /// Stessa struttura di `providersJSON()` nel mock (righe ~377-386). I campi
-    /// `displayName`/`isConnected`/`authMethods` e `models` come array di
-    /// stringhe NON sono decodificati da `ProviderV2` (che espone solo
-    /// id/name/models/defaultModel/npm/config/enabled): il fixture li replica
-    /// ugualmente per fedeltà al mock.
+    /// Stessa struttura di `providersJSON()` nel mock (righe ~377-395, FIX F4:
+    /// `models` è ora un array di OGGETTI `ModelV2`, prima erano stringhe e il
+    /// decode leniente di `ProviderV2.models` le azzerava).
     private let providersFixture: [[String: Any]] = [
         ["id": "openai", "name": "OpenAI", "displayName": "OpenAI", "isConnected": true,
-         "authMethods": ["api_key"], "models": ["gpt-4o", "gpt-4o-mini"]],
+         "authMethods": ["api_key"], "models": [
+            ["id": "gpt-4o", "providerID": "openai", "name": "gpt-4o"],
+            ["id": "gpt-4o-mini", "providerID": "openai", "name": "gpt-4o-mini"],
+         ]],
         ["id": "anthropic", "name": "Anthropic", "displayName": "Anthropic", "isConnected": true,
-         "authMethods": ["api_key"], "models": ["claude-sonnet-4-5"]],
+         "authMethods": ["api_key"], "models": [
+            ["id": "claude-sonnet-4-5", "providerID": "anthropic", "name": "claude-sonnet-4-5"],
+         ]],
         ["id": "deepseek", "name": "DeepSeek", "displayName": "DeepSeek", "isConnected": false,
-         "authMethods": ["api_key"], "models": ["deepseek-v4-flash-free"]],
+         "authMethods": ["api_key"], "models": [
+            ["id": "deepseek-v4-flash-free", "providerID": "deepseek", "name": "deepseek-v4-flash-free"],
+         ]],
     ]
 
     /// Stessa struttura di `permissionRequestJSON()` nel mock (righe ~701-715).
@@ -630,5 +635,571 @@ final class MockServerV2IntegrationTests: XCTestCase {
         XCTAssertEqual(models[0].cost?.currency, "USD")
         XCTAssertEqual(models[1].id, "claude-sonnet-4-5")
         XCTAssertEqual(models[2].id, "deepseek-v4-flash-free")
+    }
+
+    // MARK: - P. Model default
+
+    /// `GET /api/model/default` → `{providerID, modelID}` come servito dal
+    /// mock (F4): `modelDefault` decodifica `ModelDefaultV2`.
+    func testModelDefault_whenMockServer_shouldReturnDefaultModel() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/model/default")
+            return mockResponse(for: request, status: 200, object: ["providerID": "openai", "modelID": "gpt-4o"])
+        }
+
+        let client = await makeV2Client()
+        let model = try await client.modelDefault()
+
+        XCTAssertNotNil(model)
+        XCTAssertEqual(model?.providerID, "openai")
+        XCTAssertEqual(model?.modelID, "gpt-4o")
+    }
+
+    /// `GET /api/model/default?directory=none` → `{}` come servito dal mock
+    /// (F4, sentinella "nessun default"): non è un errore, `modelDefault`
+    /// ritorna un `ModelDefaultV2` con i campi assenti (nil).
+    func testModelDefault_whenMockReturnsEmptyObject_shouldReturnNilFields() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/model/default")
+            XCTAssertEqual(request.url?.query, "directory=none")
+            return mockResponse(for: request, status: 200, object: [String: Any]())
+        }
+
+        let client = await makeV2Client()
+        let model = try await client.modelDefault(location: "none")
+
+        XCTAssertNotNil(model)
+        XCTAssertNil(model?.providerID)
+        XCTAssertNil(model?.modelID)
+    }
+
+    // MARK: - Q. Provider get
+
+    /// `GET /api/provider/:id` → provider singolo come servito dal mock (F4):
+    /// decodifica `ProviderV2` incluso `models` come array di `ModelV2`.
+    func testProviderGet_whenMockServer_shouldReturnSingleProvider() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/provider/anthropic")
+            return mockResponse(for: request, status: 200, object: self.providersFixture[1])
+        }
+
+        let client = await makeV2Client()
+        let provider = try await client.providerGet(id: "anthropic")
+
+        XCTAssertEqual(provider.id, "anthropic")
+        XCTAssertEqual(provider.name, "Anthropic")
+        XCTAssertEqual(provider.models.map(\.id), ["claude-sonnet-4-5"])
+    }
+
+    /// `GET /api/provider/:id` su provider inesistente → 404
+    /// `ProviderModelNotFoundError` (body v2 `{_tag, message}`) come servito
+    /// dal mock (F4): `ServerError.kind == .providerModelNotFound`.
+    func testProviderGet_whenMockReturns404_shouldThrowProviderModelNotFound() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/provider/ghost")
+            let object: [String: Any] = [
+                "_tag": "ProviderModelNotFoundError",
+                "message": "Provider not found: ghost",
+            ]
+            return mockResponse(for: request, status: 404, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            _ = try await client.providerGet(id: "ghost")
+            XCTFail("Atteso ServerError 404")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.kind, .providerModelNotFound)
+            XCTAssertEqual(error.statusCode, 404)
+        }
+    }
+
+    // MARK: - R. Compact / Wait
+
+    /// `POST /api/session/:id/compact` → 200 `{}` come servito dal mock (F4):
+    /// `compact` (performNoContent) non lancia.
+    func testCompact_whenMockServer_shouldNotThrow() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/compact")
+            return mockResponse(for: request, status: 200, object: [:])
+        }
+
+        let client = await makeV2Client()
+        try await client.compact(id: "sess-1")
+    }
+
+    /// `POST /api/session/:id/wait` → 200 `{}` come servito dal mock (F4):
+    /// `wait` (performNoContent) non lancia.
+    func testWait_whenMockServer_shouldNotThrow() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/wait")
+            return mockResponse(for: request, status: 200, object: [:])
+        }
+
+        let client = await makeV2Client()
+        try await client.wait(id: "sess-1")
+    }
+
+    /// `POST /api/session/missing/compact` → 404 `SessionNotFoundError` come
+    /// servito dal mock (F4, sessione riservata `missing`): il client mappa in
+    /// `ServerError.kind == .sessionNotFound`.
+    func testCompact_whenMockSessionMissing_shouldThrowSessionNotFound() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/missing/compact")
+            let object: [String: Any] = [
+                "_tag": "SessionNotFoundError",
+                "message": "Session not found: missing",
+            ]
+            return mockResponse(for: request, status: 404, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            try await client.compact(id: "missing")
+            XCTFail("Atteso ServerError 404")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.kind, .sessionNotFound)
+            XCTAssertEqual(error.statusCode, 404)
+        }
+    }
+
+    /// `POST /api/session/busy/compact` → 503 `SessionBusyError` come servito
+    /// dal mock (F4, sessione riservata `busy`): status 5xx → kind `.http`
+    /// (retryable), NON `.sessionNotFound`.
+    func testCompact_whenMockSessionBusy_shouldThrowHTTP503() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/busy/compact")
+            let object: [String: Any] = [
+                "_tag": "SessionBusyError",
+                "message": "sessione busy",
+            ]
+            return mockResponse(for: request, status: 503, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            try await client.compact(id: "busy")
+            XCTFail("Atteso ServerError 503")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.kind, .http)
+            XCTAssertEqual(error.statusCode, 503)
+            XCTAssertTrue(error.isRetryable)
+        }
+    }
+
+    // MARK: - S. Context
+
+    /// `GET /api/session/:id/context` → `{sessionID, files}` come servito dal
+    /// mock (F4): `SessionContextV2` preserva il payload grezzo (`raw`).
+    func testContext_whenMockServer_shouldReturnRawContext() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/context")
+            return mockResponse(for: request, status: 200, object: ["sessionID": "sess-1", "files": ["a.swift"]])
+        }
+
+        let client = await makeV2Client()
+        let context = try await client.context(id: "sess-1")
+
+        XCTAssertEqual(context.sessionID, "sess-1")
+        XCTAssertNotNil(context.raw["files"])
+    }
+
+    /// `GET /api/session/missing/context` → 404 `SessionNotFoundError` come
+    /// servito dal mock (F4): `ServerError.kind == .sessionNotFound`.
+    func testContext_whenMockSessionMissing_shouldThrowSessionNotFound() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/session/ghost-session/context")
+            let object: [String: Any] = [
+                "_tag": "SessionNotFoundError",
+                "message": "Session not found: ghost-session",
+            ]
+            return mockResponse(for: request, status: 404, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            _ = try await client.context(id: "ghost-session")
+            XCTFail("Atteso ServerError 404")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.kind, .sessionNotFound)
+        }
+    }
+
+    // MARK: - T. Fork
+
+    /// `POST /api/session/:id/fork` body `{messageID}` → 200
+    /// `sessionV2JSON` con id NUOVO come servito dal mock (F4): decodifica
+    /// `SessionV2Info`.
+    func testFork_whenMockServer_shouldReturnForkedSession() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/fork")
+            if let dict = bodyObject(from: request) {
+                XCTAssertEqual(dict["messageID"] as? String, "msg-2")
+            }
+            return mockResponse(for: request, status: 200, object: self.sessionV2Fixture(id: "sess-2"))
+        }
+
+        let client = await makeV2Client()
+        let forked = try await client.fork(id: "sess-1", messageID: "msg-2")
+
+        XCTAssertEqual(forked.id, "sess-2")
+    }
+
+    /// `POST /api/session/missing/fork` → 404 `SessionNotFoundError` come
+    /// servito dal mock (F4): `ServerError.kind == .sessionNotFound`.
+    func testFork_whenMockSessionMissing_shouldThrowSessionNotFound() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/missing/fork")
+            let object: [String: Any] = [
+                "_tag": "SessionNotFoundError",
+                "message": "Session not found: missing",
+            ]
+            return mockResponse(for: request, status: 404, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            _ = try await client.fork(id: "missing")
+            XCTFail("Atteso ServerError 404")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.kind, .sessionNotFound)
+        }
+    }
+
+    // MARK: - U. Summarize
+
+    /// `POST /api/session/:id/summarize` → 200 `{summary}` come servito dal
+    /// mock (F4): `summarize` ritorna la stringa sotto chiave `summary`.
+    func testSummarize_whenMockServer_shouldReturnSummaryString() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/summarize")
+            return mockResponse(for: request, status: 200, object: ["summary": "Riepilogo mock della sessione"])
+        }
+
+        let client = await makeV2Client()
+        let summary = try await client.summarize(id: "sess-1")
+
+        XCTAssertEqual(summary, "Riepilogo mock della sessione")
+    }
+
+    /// `POST /api/session/missing/summarize` → 404 `SessionNotFoundError` come
+    /// servito dal mock (F4): `ServerError.kind == .sessionNotFound`.
+    func testSummarize_whenMockSessionMissing_shouldThrowSessionNotFound() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/missing/summarize")
+            let object: [String: Any] = [
+                "_tag": "SessionNotFoundError",
+                "message": "Session not found: missing",
+            ]
+            return mockResponse(for: request, status: 404, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            _ = try await client.summarize(id: "missing")
+            XCTFail("Atteso ServerError 404")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.kind, .sessionNotFound)
+        }
+    }
+
+    // MARK: - V. Share / Unshare
+
+    /// `POST /api/session/:id/share` → 200 `{url}` come servito dal mock (F4):
+    /// `share` ritorna l'URL decodificato da `ShareResultV2`.
+    func testShare_whenMockServer_shouldReturnURL() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/share")
+            return mockResponse(for: request, status: 200, object: ["url": "https://opencode.dev/share/mock-share-token"])
+        }
+
+        let client = await makeV2Client()
+        let url = try await client.share(id: "sess-1")
+
+        XCTAssertEqual(url, "https://opencode.dev/share/mock-share-token")
+    }
+
+    /// `POST /api/session/:id/share` → 200 `{shareUrl}` (forma alternativa del
+    /// wire): `ShareResultV2` accetta `url`/`shareUrl`/`link`.
+    func testShare_whenMockReturnsShareUrlKey_shouldReturnURL() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/share")
+            return mockResponse(for: request, status: 200, object: ["shareUrl": "https://opencode.dev/share/alt"])
+        }
+
+        let client = await makeV2Client()
+        let url = try await client.share(id: "sess-1")
+
+        XCTAssertEqual(url, "https://opencode.dev/share/alt")
+    }
+
+    /// `DELETE /api/session/:id/share` → 200 `{}` come servito dal mock (F4):
+    /// `unshare` (performNoContent) non lancia.
+    func testUnshare_whenMockServer_shouldNotThrow() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/share")
+            return mockResponse(for: request, status: 200, object: [:])
+        }
+
+        let client = await makeV2Client()
+        try await client.unshare(id: "sess-1")
+    }
+
+    /// `POST /api/session/missing/share` → 404 `SessionNotFoundError` come
+    /// servito dal mock (F4): `ServerError.kind == .sessionNotFound`.
+    func testShare_whenMockSessionMissing_shouldThrowSessionNotFound() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/missing/share")
+            let object: [String: Any] = [
+                "_tag": "SessionNotFoundError",
+                "message": "Session not found: missing",
+            ]
+            return mockResponse(for: request, status: 404, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            _ = try await client.share(id: "missing")
+            XCTFail("Atteso ServerError 404")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.kind, .sessionNotFound)
+        }
+    }
+
+    // MARK: - W. Single message
+
+    /// `GET /api/session/:id/message/:messageID` → messaggio singolo come
+    /// servito dal mock (F4, `singleMessageJSON`): `time.created` è numerico in
+    /// millisecondi (wire reale 1.18), decodificato dal dateDecodingStrategy
+    /// custom del client.
+    func testMessage_whenMockServer_shouldReturnSingleMessage() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/message/msg-1")
+            let object: [String: Any] = [
+                "id": "msg-1",
+                "sessionID": "sess-1",
+                "type": "assistant",
+                "time": ["created": Int(Date().timeIntervalSince1970 * 1000)],
+                "content": [["type": "text", "text": "Mock risposta per msg-1"]],
+            ]
+            return mockResponse(for: request, status: 200, object: object)
+        }
+
+        let client = await makeV2Client()
+        let message = try await client.message(id: "sess-1", messageID: "msg-1")
+
+        XCTAssertEqual(message.id, "msg-1")
+        XCTAssertEqual(message.type, "assistant")
+        XCTAssertNotNil(message.time?.created)
+        XCTAssertEqual(message.parts?.count, 1)
+    }
+
+    /// `GET /api/session/sess-1/message/missing` → 404 `MessageNotFoundError`
+    /// come servito dal mock (F4, messageID riservato `missing`): il client lo
+    /// mappa in `ServerError` 404.
+    func testMessage_whenMockMessageMissing_shouldThrow404() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/message/missing")
+            let object: [String: Any] = [
+                "_tag": "MessageNotFoundError",
+                "message": "Message not found: missing",
+            ]
+            return mockResponse(for: request, status: 404, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            _ = try await client.message(id: "sess-1", messageID: "missing")
+            XCTFail("Atteso ServerError 404")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.statusCode, 404)
+        }
+    }
+
+    // MARK: - X. Permission saved
+
+    /// `GET /api/permission/saved` → `[PermissionRequestV2]` come servito dal
+    /// mock (F4): stesse voci di `permissionRequestJSON`.
+    func testPermissionSaved_whenMockServer_shouldDecodeRule() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/permission/saved")
+            return mockResponse(for: request, status: 200, array: self.permissionRequestFixture)
+        }
+
+        let client = await makeV2Client()
+        let rules = try await client.permissionSaved()
+
+        XCTAssertEqual(rules.count, 1)
+        XCTAssertEqual(rules[0].id, "req-1")
+        XCTAssertEqual(rules[0].tool, "bash")
+    }
+
+    /// `DELETE /api/permission/saved/:id` su regola nota → 200 `{}` come
+    /// servito dal mock (F4): `permissionRemoveSaved` (performNoContent)
+    /// non lancia.
+    func testPermissionRemoveSaved_whenMockRuleExists_shouldNotThrow() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.url?.path, "/api/permission/saved/req-1")
+            return mockResponse(for: request, status: 200, object: [:])
+        }
+
+        let client = await makeV2Client()
+        try await client.permissionRemoveSaved(id: "req-1")
+    }
+
+    /// `DELETE /api/permission/saved/:id` su regola sconosciuta → 404 come
+    /// servito dal mock (F4): `permissionRemoveSaved` lancia `ServerError` 404.
+    func testPermissionRemoveSaved_whenMockRuleUnknown_shouldThrow404() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.url?.path, "/api/permission/saved/ghost-rule")
+            let object: [String: Any] = [
+                "_tag": "MessageNotFoundError",
+                "message": "Saved permission not found: ghost-rule",
+            ]
+            return mockResponse(for: request, status: 404, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            try await client.permissionRemoveSaved(id: "ghost-rule")
+            XCTFail("Atteso ServerError 404")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.statusCode, 404)
+        }
+    }
+
+    // MARK: - Y. File list / find
+
+    /// `GET /api/file` → `[FileEntryV2]` (array nudo) come servito dal mock
+    /// (F4): `path` obbligatorio, `modifiedAt` ISO8601 decodificata.
+    func testFileList_whenMockServer_shouldDecodeEntries() async throws {
+        let iso = ISO8601DateFormatter().string(from: Date())
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/file")
+            return mockResponse(for: request, status: 200, array: [
+                [
+                    "name": "main.swift",
+                    "path": "/tmp/mock/main.swift",
+                    "type": "file",
+                    "size": 123,
+                    "modifiedAt": iso,
+                ],
+                [
+                    "name": "src",
+                    "path": "/tmp/mock/src",
+                    "type": "directory",
+                    "size": 0,
+                    "modifiedAt": iso,
+                ],
+            ])
+        }
+
+        let client = await makeV2Client()
+        let files = try await client.fileList()
+
+        XCTAssertEqual(files.count, 2)
+        XCTAssertEqual(files[0].name, "main.swift")
+        XCTAssertEqual(files[0].path, "/tmp/mock/main.swift")
+        XCTAssertEqual(files[0].type, "file")
+        XCTAssertEqual(files[0].size, 123)
+        XCTAssertNotNil(files[0].modifiedAt)
+        XCTAssertEqual(files[1].type, "directory")
+    }
+
+    /// `GET /api/file` → 400 `InvalidRequestError` come servito dal mock (F4)
+    /// quando il server rifiuta la query: il client deve surface `ServerError`
+    /// 400, non crashare. (Il client invia `dirs=true|false`; il 400 qui simula
+    /// la validazione server-side di altri parametri.)
+    func testFileList_whenMockReturns400InvalidDirs_shouldThrow400() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/file")
+            let object: [String: Any] = [
+                "_tag": "InvalidRequestError",
+                "message": "Expected dirs to be \"true\" or \"false\", got \"bogus\"",
+            ]
+            return mockResponse(for: request, status: 400, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            _ = try await client.fileList(dirs: true)
+            XCTFail("Atteso ServerError 400")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.statusCode, 400)
+        }
+    }
+
+    /// `GET /api/file/find?query=foo` → `["a.swift", "b.swift"]` (array nudo)
+    /// come servito dal mock (F4): `FileFindV2` decodifica la lista.
+    func testFileFind_whenMockServer_shouldReturnPaths() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/file/find")
+            XCTAssertEqual(request.url?.query, "query=foo")
+            return mockResponse(for: request, status: 200, array: ["a.swift", "b.swift"])
+        }
+
+        let client = await makeV2Client()
+        let files = try await client.fileFind(query: "foo")
+
+        XCTAssertEqual(files, ["a.swift", "b.swift"])
+    }
+
+    /// `GET /api/file/find` senza `query` → 400 come servito dal mock (F4):
+    /// `ServerError` con statusCode 400.
+    func testFileFind_whenMockReturns400MissingQuery_shouldThrow400() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.path, "/api/file/find")
+            let object: [String: Any] = [
+                "_tag": "InvalidRequestError",
+                "message": "Missing key [query]",
+            ]
+            return mockResponse(for: request, status: 400, object: object)
+        }
+
+        let client = await makeV2Client()
+
+        do {
+            _ = try await client.fileFind()
+            XCTFail("Atteso ServerError 400")
+        } catch let error as ServerError {
+            XCTAssertEqual(error.statusCode, 400)
+        }
     }
 }
