@@ -106,4 +106,118 @@ final class EventCoalescerTests: XCTestCase {
         let final = await coalescer.pendingCount()
         XCTAssertEqual(final, 0)
     }
+
+    /// (d) Merge dei delta di ragionamento con lo stesso partID.
+    func testReasoningDeltas_samePartID_shouldMergeText() async {
+        let collector = BatchCollector()
+        let coalescer = EventCoalescer(flushFrameMS: 1_000, onBatch: { collector.append($0) })
+
+        await coalescer.enqueue(.sessionReasoningDelta(partID: "r1", text: "think"))
+        await coalescer.enqueue(.sessionReasoningDelta(partID: "r1", text: "ing"))
+        let pending = await coalescer.pendingCount()
+        XCTAssertEqual(pending, 1)
+
+        await coalescer.flush()
+        XCTAssertEqual(collector.all().first?.first, .sessionReasoningDelta(partID: "r1", text: "thinking"))
+
+        await coalescer.cancel()
+    }
+
+    /// (e) Merge dei delta di output tool con lo stesso toolCallID.
+    func testToolOutputDeltas_sameToolCallID_shouldMergeText() async {
+        let collector = BatchCollector()
+        let coalescer = EventCoalescer(flushFrameMS: 1_000, onBatch: { collector.append($0) })
+
+        await coalescer.enqueue(.sessionToolOutputDelta(toolCallID: "t1", text: "out"))
+        await coalescer.enqueue(.sessionToolOutputDelta(toolCallID: "t1", text: "put"))
+        let pending = await coalescer.pendingCount()
+        XCTAssertEqual(pending, 1)
+
+        await coalescer.flush()
+        XCTAssertEqual(collector.all().first?.first, .sessionToolOutputDelta(toolCallID: "t1", text: "output"))
+
+        await coalescer.cancel()
+    }
+
+    /// (f) Delta con partID diversi NON vengono fusi.
+    func testTextDeltas_differentPartIDs_shouldNotMerge() async {
+        let coalescer = EventCoalescer(flushFrameMS: 1_000)
+
+        await coalescer.enqueue(.sessionTextDelta(partID: "p1", text: "A"))
+        await coalescer.enqueue(.sessionTextDelta(partID: "p2", text: "B"))
+        let pending = await coalescer.pendingCount()
+        XCTAssertEqual(pending, 2)
+
+        await coalescer.cancel()
+    }
+
+    /// (g) Il merge è solo ADIACENTE: un evento intermedio spezza la fusione.
+    func testTextDeltas_interleavedWithNonDelta_shouldNotMergeAcross() async {
+        let coalescer = EventCoalescer(flushFrameMS: 1_000)
+
+        await coalescer.enqueue(.sessionTextDelta(partID: "p1", text: "A"))
+        await coalescer.enqueue(.sessionStatus(.busy))
+        await coalescer.enqueue(.sessionTextDelta(partID: "p1", text: "B"))
+        let pending = await coalescer.pendingCount()
+        XCTAssertEqual(pending, 3)
+
+        await coalescer.cancel()
+    }
+
+    /// (h) Lo stream `batches` riceve il batch fuso dopo un flush esplicito.
+    func testBatchesStream_whenFlush_shouldYieldCoalescedBatch() async {
+        let coalescer = EventCoalescer(flushFrameMS: 1_000)
+
+        await coalescer.enqueue(.sessionTextDelta(partID: "p", text: "A"))
+        await coalescer.enqueue(.sessionTextDelta(partID: "p", text: "B"))
+        await coalescer.flush()
+
+        let batches = await coalescer.batches
+        var iterator = batches.makeAsyncIterator()
+        let batch = await iterator.next()
+        XCTAssertEqual(batch?.count, 1)
+        XCTAssertEqual(batch?.first, .sessionTextDelta(partID: "p", text: "AB"))
+
+        await coalescer.cancel()
+    }
+
+    /// (i) Il flush automatico (frame breve) emette il batch senza flush manuale.
+    func testAutoFlush_whenFrameElapses_shouldEmitBatchWithoutManualFlush() async throws {
+        let collector = BatchCollector()
+        let coalescer = EventCoalescer(flushFrameMS: 5, yieldMS: 1, onBatch: { collector.append($0) })
+
+        await coalescer.enqueue(.sessionTextDelta(partID: "p", text: "X"))
+
+        let deadline = Date().addingTimeInterval(5)
+        while collector.all().isEmpty && Date() < deadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        XCTAssertEqual(collector.all().first?.first, .sessionTextDelta(partID: "p", text: "X"))
+
+        await coalescer.cancel()
+    }
+
+    /// (j) `flush()` su buffer vuoto non emette nulla.
+    func testFlush_whenBufferEmpty_shouldEmitNothing() async {
+        let collector = BatchCollector()
+        let coalescer = EventCoalescer(flushFrameMS: 1_000, onBatch: { collector.append($0) })
+
+        await coalescer.flush()
+        XCTAssertTrue(collector.all().isEmpty)
+
+        await coalescer.cancel()
+    }
+
+    /// (k) `part.updated` con messageID/partID diversi NON vengono dedupati.
+    func testPartUpdated_differentPartOrMessage_shouldNotBeDeduped() async {
+        let coalescer = EventCoalescer(flushFrameMS: 1_000)
+
+        await coalescer.enqueue(.sessionMessagePartUpdated(messageID: "m1", partID: "p1", state: "completed"))
+        await coalescer.enqueue(.sessionMessagePartUpdated(messageID: "m1", partID: "p2", state: "completed"))
+        let pending = await coalescer.pendingCount()
+        XCTAssertEqual(pending, 2)
+
+        await coalescer.cancel()
+    }
 }

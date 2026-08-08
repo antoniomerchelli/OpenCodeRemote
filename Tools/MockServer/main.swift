@@ -527,7 +527,16 @@ final class MockServer {
                 broadcastSSE(sessionID: id, block: "event: session.aborted\ndata: {\"sessionId\":\(jsonString(id))}\nid: \(nextEventID(sessionID: id))\n\n")
                 connection.respondJSON(status: 200, object: ["ok": true]); return
             case ("POST", 4, "rename"):
-                connection.respondJSON(status: 200, object: ["ok": true]); return
+                // Wire reale: risponde la sessione aggiornata (SessionV2Info).
+                // Il client (OpenCodeAPIClientV2.rename) decodifica
+                // SessionV2Info? → `{"ok": true}` non è decodificabile. Persiste
+                // il title negli override, come fa switchAgent.
+                if let title = request.bodyJSONObject()?["title"] as? String {
+                    var overrides = sessionOverrides[id] ?? [:]
+                    overrides["title"] = title
+                    sessionOverrides[id] = overrides
+                }
+                connection.respondJSON(status: 200, object: sessionV2JSON(id: id)); return
             case ("POST", 4, "shell"):
                 let command = (request.bodyJSONObject()?["command"] as? String) ?? ""
                 connection.respondJSON(status: 200, object: shellMessageJSON(kind: "shell", command: command)); return
