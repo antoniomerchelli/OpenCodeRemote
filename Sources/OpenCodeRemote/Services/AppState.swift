@@ -376,7 +376,7 @@ public final class AppState: Sendable {
             for directory in directories {
                 await directoryManager.ensureChild(directory: directory)
                 await bootstrapQueue.push(directory: directory) { [weak self] in
-                    await self?.deferredBootstrap(directory: directory, server: server)
+                    await self?.deferredBootstrap(directory: directory, server: server, generation: generation)
                 }
             }
             await bootstrapQueue.drain()
@@ -767,19 +767,35 @@ public final class AppState: Sendable {
     /// Carico differito del bootstrap di una directory (coda `bootstrapQueue`):
     /// marca la directory in caricamento, lista le sessioni e pre-carica gli
     /// store del pool (history), poi sblocca la directory. Best-effort.
-    private func deferredBootstrap(directory: String, server: ServerConnection) async {
+    /// La `generation` viene confrontata a ogni await lungo: se nel frattempo
+    /// è avvenuto un `disconnectV2` non si creano store orfani né si
+    /// sovrascrive `connectionError` con errori di una connessione vecchia.
+    private func deferredBootstrap(directory: String, server: ServerConnection, generation: Int) async {
+        guard connectionGeneration == generation else { return }
         await directoryManager.setLoadingSessions(true, for: directory)
+        // Sblocca SOLO se la generazione non è cambiata nel frattempo: se un
+        // disconnectV2 ha già rilanciato il bootstrap della generazione nuova
+        // per la stessa directory, il flag `loadingSessions` (booleano, non un
+        // contatore) non va resettato a false durante il caricamento nuovo.
+        defer {
+            let generationAtExit = connectionGeneration
+            Task { @MainActor [weak self] in
+                guard let self = self, generationAtExit == self.connectionGeneration else { return }
+                await self.directoryManager.setLoadingSessions(false, for: directory)
+            }
+        }
         do {
             let list = try await compat.listSessions(server: server, location: directory, limit: CoreConstants.initialMessagePageSize)
+            guard connectionGeneration == generation else { return }
             for info in list.sessions {
                 let store = await storePool.createSessionStore(sessionID: info.id)
                 await store.prefetch(limit: CoreConstants.initialMessagePageSize)
                 await storePool.release(sessionID: info.id)
             }
         } catch {
+            guard connectionGeneration == generation else { return }
             connectionError = error.localizedDescription
         }
-        await directoryManager.setLoadingSessions(false, for: directory)
     }
     
     /// Legge la lista sessioni v2 dal server e la mappa al dominio `SessionInfoV2`.

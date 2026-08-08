@@ -590,6 +590,61 @@ final class MockServerV2IntegrationTests: XCTestCase {
         XCTAssertTrue(text?.contains("foo") ?? false)
     }
 
+    // MARK: - M.1 Wire model nelle chiamate di turno (F7)
+
+    /// `POST /api/session/:id/shell` con `model` → il body deve usare la
+    /// chiave v2 `model.id` (e `model.providerID`), MAI la chiave v1
+    /// `modelID` (lezione S22: chiavi speculari tra v2 e v1).
+    func testShell_whenModelSpecified_shouldEncodeModelAsID() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/shell")
+            if let dict = bodyObject(from: request),
+               let model = dict["model"] as? [String: Any] {
+                XCTAssertEqual(model["id"] as? String, "gpt-4o")
+                XCTAssertEqual(model["providerID"] as? String, "openai")
+                XCTAssertNil(model["modelID"], "La shell v2 NON deve usare la chiave v1 modelID")
+            } else {
+                XCTFail("body shell senza model")
+            }
+            return mockResponse(for: request, status: 200, object: self.shellMessageFixture(kind: "shell", command: "ls"))
+        }
+
+        let client = await makeV2Client()
+        let message = try await client.shell(
+            id: "sess-1",
+            request: SessionShellV2(command: "ls", model: ModelRefV2(providerID: "openai", modelID: "gpt-4o"))
+        )
+
+        XCTAssertNotNil(message)
+    }
+
+    /// `POST /api/session/:id/command` con `model` → stessa regola v2:
+    /// `model.id` presente, `modelID` assente.
+    func testCommand_whenModelSpecified_shouldEncodeModelAsID() async throws {
+        MockURLProtocol.responseHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/session/sess-1/command")
+            if let dict = bodyObject(from: request),
+               let model = dict["model"] as? [String: Any] {
+                XCTAssertEqual(model["id"] as? String, "claude-sonnet")
+                XCTAssertEqual(model["providerID"] as? String, "anthropic")
+                XCTAssertNil(model["modelID"], "La command v2 NON deve usare la chiave v1 modelID")
+            } else {
+                XCTFail("body command senza model")
+            }
+            return mockResponse(for: request, status: 200, object: self.shellMessageFixture(kind: "command", command: "foo"))
+        }
+
+        let client = await makeV2Client()
+        let message = try await client.command(
+            id: "sess-1",
+            request: SessionCommandV2(command: "foo", model: ModelRefV2(providerID: "anthropic", modelID: "claude-sonnet"))
+        )
+
+        XCTAssertNotNil(message)
+    }
+
     // MARK: - N. Switch agent
 
     /// `POST /api/session/:id/agent` body `{"agent":"build"}` → 200 `echoBody`

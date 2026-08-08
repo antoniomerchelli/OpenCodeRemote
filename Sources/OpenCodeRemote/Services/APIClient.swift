@@ -302,19 +302,19 @@ public actor V1OpenCodeAPIClient: OpenCodeAPIClient {
         return url
     }
     
-    private func request(_ method: String, _ url: URL, server: ServerConnection) -> URLRequest {
+    private func request(_ method: String, _ url: URL, server: ServerConnection, timeout: TimeInterval = 30) -> URLRequest {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let auth = server.authHeader {
             req.setValue(auth, forHTTPHeaderField: "Authorization")
         }
-        req.timeoutInterval = 30
+        req.timeoutInterval = timeout
         return req
     }
     
-    private func authenticatedRequest(_ method: String, _ url: URL, server: ServerConnection, body: Data? = nil) -> URLRequest {
-        var req = request(method, url, server: server)
+    private func authenticatedRequest(_ method: String, _ url: URL, server: ServerConnection, body: Data? = nil, timeout: TimeInterval = 30) -> URLRequest {
+        var req = request(method, url, server: server, timeout: timeout)
         req.httpBody = body
         return req
     }
@@ -529,14 +529,16 @@ public actor V1OpenCodeAPIClient: OpenCodeAPIClient {
     public func sendMessage(_ sessionId: SessionID, request: SendMessageRequest) async throws -> Message {
         let server = try requireServer()
         let body = try encoder.encode(request)
-        let req = authenticatedRequest("POST", try url(for: "/session/\(sessionId.rawValue)/message", server: server), server: server, body: body)
+        // Un turno LLM può durare minuti: timeout lungo come per i turni v2
+        // (il default di 30s troncherebbe le risposte lente).
+        let req = authenticatedRequest("POST", try url(for: "/session/\(sessionId.rawValue)/message", server: server), server: server, body: body, timeout: TimeInterval(CoreConstants.apiTurnTimeoutMS) / 1_000)
         return try await perform(req)
     }
     
     public func sendMessageAsync(_ sessionId: SessionID, request: SendMessageAsyncRequest) async throws {
         let server = try requireServer()
         let body = try encoder.encode(request)
-        let req = authenticatedRequest("POST", try url(for: "/api/session/\(sessionId.rawValue)/prompt", server: server), server: server, body: body)
+        let req = authenticatedRequest("POST", try url(for: "/api/session/\(sessionId.rawValue)/prompt", server: server), server: server, body: body, timeout: TimeInterval(CoreConstants.apiTurnTimeoutMS) / 1_000)
         let _ = try await perform(req) as [String: JSONValue]
     }
     
@@ -692,7 +694,9 @@ public actor V1OpenCodeAPIClient: OpenCodeAPIClient {
             }
         )
         let data = try encoder.encode(body)
-        let req = authenticatedRequest("POST", try url(for: "/session/\(sessionId.rawValue)/shell", server: server), server: server, body: data)
+        // La shell fa girare l'agente: un turno può durare minuti → timeout
+        // lungo (il default di 30s troncava i comandi lenti).
+        let req = authenticatedRequest("POST", try url(for: "/session/\(sessionId.rawValue)/shell", server: server), server: server, body: data, timeout: TimeInterval(CoreConstants.apiTurnTimeoutMS) / 1_000)
         return try await performShell(req)
     }
 
@@ -834,10 +838,25 @@ public actor V1OpenCodeAPIClient: OpenCodeAPIClient {
 
 // MARK: - SSE Client Implementation
 
+/// Box per il task di connessione di una generazione `connect()`: il watchdog
+/// idle lo usa per cancellare SOLO la connessione della propria generazione,
+/// mai un task di una `connect()` successiva (race watchdog ↔ reconnect).
+private final class V1SSEConnectionBox: @unchecked Sendable {
+    var task: Task<Void, Never>?
+}
+
 public actor V1SSEClient: SSEClient {
     private var task: Task<Void, Never>?
     private var continuation: AsyncStream<SSEEvent>.Continuation?
     private(set) public var isConnected: Bool = false
+    /// Timestamp dell'ultimo byte ricevuto (base del watchdog idle).
+    private var lastActivity = Date()
+    /// Il watchdog idle ha scattato: stream muto oltre la soglia → la
+    /// connessione è half-open (TCP zombie) e va chiusa con un errore per
+    /// forzare il caller a riconnettersi.
+    private var watchdogFired = false
+    /// Soglia idle condivisa con lo stream v2 (SessionEventStream).
+    private let idleTimeoutMS = CoreConstants.streamIdleTimeoutMS
     
     public init() {}
     
@@ -859,19 +878,65 @@ public actor V1SSEClient: SSEClient {
             request.setValue(auth, forHTTPHeaderField: "Authorization")
         }
         
-        task = Task { [weak self] in
+        // Reset dello stato watchdog a ogni generazione: senza questo un
+        // `lastActivity` residuo di una connect() precedente farebbe scattare
+        // il watchdog su uno stream sano al primo check (~5s) invece di dare
+        // 60s di grazia, e il flag `watchdogFired` sporcherebbe la generazione
+        // successiva.
+        watchdogFired = false
+        lastActivity = Date()
+
+        // Box della generazione corrente: il task di connessione vi si
+        // registra subito dopo la creazione (prima che il body giri); il
+        // watchdog cancella SOLO questo task.
+        let connectionBox = V1SSEConnectionBox()
+        let newTask = Task { [weak self, connectionBox] in
             guard let self = self else { return }
             
-            do {
-                let (bytes, response) = try await URLSession.shared.bytes(for: request)
-                
-                guard let httpResponse = response as? HTTPURLResponse,
-                      (200...299).contains(httpResponse.statusCode) else {
-                    await self.handleConnectionError(OpenCodeError.invalidResponse)
-                    return
+            // Timeout di connessione: un IP black-hole (SYN drop) non deve
+            // tenere il tentativo appeso per il timeout TCP di sistema
+            // (~60-75s) prima di fallire. Stessa costante e comportamento
+            // dello stream v2 (SessionEventStream).
+            let bytesTask = Task { try await URLSession.shared.bytes(for: request) }
+            let connectTimeoutTask = Task { [bytesTask] in
+                try? await Task.sleep(nanoseconds: UInt64(CoreConstants.streamConnectTimeoutMS) * 1_000_000)
+                if !Task.isCancelled {
+                    bytesTask.cancel()
                 }
-                
+            }
+            
+            var bytes: URLSession.AsyncBytes? = nil
+            var response: URLResponse? = nil
+            var connectFailed = false
+            do {
+                (bytes, response) = try await bytesTask.value
+                connectTimeoutTask.cancel()
+            } catch {
+                connectTimeoutTask.cancel()
+                connectFailed = true
+            }
+            
+            if connectFailed {
+                // Connessione fallita o scaduta: errore al caller, che decide
+                // se/come riconnettersi (mai lasciare lo stream appeso).
+                await self.handleConnectionError(OpenCodeError.timeout)
+            } else if let bytes, let response,
+                      let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode) {
                 await self.setConnected(true)
+                
+                // Watchdog idle: se non arriva alcun byte per idleTimeoutMS la
+                // connessione è half-open (TCP zombie dopo sleep/wake o cambio
+                // rete) → cancella il task e consegna un errore per forzare il
+                // caller a riconnettersi (pattern del v2 in SessionEventStream).
+                let watchdog = Task { [weak self, connectionBox] in
+                    while !Task.isCancelled {
+                        try? await Task.sleep(nanoseconds: 5_000_000_000)
+                        if Task.isCancelled { break }
+                        guard let self = self else { break }
+                        if await self.checkIdleAndMarkWatchdog(connectionBox.task) { break }
+                    }
+                }
                 
                 var currentEvent: String = ""
                 var currentData: String = ""
@@ -881,45 +946,68 @@ public actor V1SSEClient: SSEClient {
                 // righe vuote, che in SSE sono i separatori di evento (`\n\n`).
                 // Senza di esse gli eventi non vengono mai dispatchati. Si
                 // parsa byte-a-byte come fa SessionEventStream (v2).
-                for try await chunk in bytes {
-                    if Task.isCancelled { break }
-                    buffer.append(chunk)
-                    while let newline = buffer.firstIndex(of: 0x0A) {
-                        let lineData = buffer.subdata(in: buffer.startIndex..<newline)
-                        buffer.removeSubrange(buffer.startIndex...newline)
-                        var line = String(decoding: lineData, as: UTF8.self)
-                        if line.hasSuffix("\r") { line.removeLast() }
-                        
-                        if line.hasPrefix("event: ") {
-                            currentEvent = String(line.dropFirst(7))
-                        } else if line.hasPrefix("data: ") {
-                            currentData = String(line.dropFirst(6))
-                        } else if line.isEmpty {
-                            // Empty line means end of event
-                            if !currentEvent.isEmpty, !currentData.isEmpty {
-                                await self.handleSSEMessage(event: currentEvent, data: currentData)
+                do {
+                    for try await chunk in bytes {
+                        if Task.isCancelled { break }
+                        await self.touchLastActivity()
+                        buffer.append(chunk)
+                        while let newline = buffer.firstIndex(of: 0x0A) {
+                            let lineData = buffer.subdata(in: buffer.startIndex..<newline)
+                            buffer.removeSubrange(buffer.startIndex...newline)
+                            var line = String(decoding: lineData, as: UTF8.self)
+                            if line.hasSuffix("\r") { line.removeLast() }
+                            
+                            if line.hasPrefix("event: ") {
+                                currentEvent = String(line.dropFirst(7))
+                            } else if line.hasPrefix("data: ") {
+                                currentData = String(line.dropFirst(6))
+                            } else if line.isEmpty {
+                                // Empty line means end of event
+                                if !currentEvent.isEmpty, !currentData.isEmpty {
+                                    await self.handleSSEMessage(event: currentEvent, data: currentData)
+                                }
+                                currentEvent = ""
+                                currentData = ""
+                            } else if line.hasPrefix("id: ") {
+                                // ignore event ID for now
+                            } else if line.hasPrefix("retry: ") {
+                                // ignore retry for now
                             }
-                            currentEvent = ""
-                            currentData = ""
-                        } else if line.hasPrefix("id: ") {
-                            // ignore event ID for now
-                        } else if line.hasPrefix("retry: ") {
-                            // ignore retry for now
                         }
                     }
+                    // Evento finale senza newline terminale.
+                    if !currentEvent.isEmpty, !currentData.isEmpty {
+                        await self.handleSSEMessage(event: currentEvent, data: currentData)
+                    }
+                    // Il watchdog idle è scattato → il loop è terminato per
+                    // cancellazione: consegna l'errore al posto di chiudere in
+                    // silenzio, così il caller si riconnette.
+                    if await self.watchdogHasFired() {
+                        await self.handleConnectionError(OpenCodeError.timeout)
+                    }
+                } catch {
+                    let watchdogFired = await self.watchdogHasFired()
+                    if watchdogFired {
+                        await self.handleConnectionError(OpenCodeError.timeout)
+                    } else if !Task.isCancelled {
+                        // Errore di trasporto REALE (DNS, TLS, reset): si
+                        // propaga com'è, non mascherato da timeout, per una
+                        // diagnosi onesta (lezione S22).
+                        await self.handleConnectionError(error)
+                    }
                 }
-                // Evento finale senza newline terminale.
-                if !currentEvent.isEmpty, !currentData.isEmpty {
-                    await self.handleSSEMessage(event: currentEvent, data: currentData)
-                }
-            } catch {
-                if !Task.isCancelled {
-                    await self.handleConnectionError(error)
-                }
+                watchdog.cancel()
+            } else {
+                // Risposta non-2xx: errore al caller. (Fix: prima il `return`
+                // saltava finishSSEStream lasciando la continuation appesa.)
+                await self.handleConnectionError(OpenCodeError.invalidResponse)
             }
             
             await self.finishSSEStream()
         }
+        
+        connectionBox.task = newTask
+        task = newTask
         
         return stream.stream
     }
@@ -934,6 +1022,34 @@ public actor V1SSEClient: SSEClient {
     
     private func setConnected(_ value: Bool) {
         isConnected = value
+    }
+    
+    // MARK: - Watchdog idle (F7): helper actor-isolated
+    
+    /// Aggiorna il timestamp dell'ultimo byte ricevuto.
+    private func touchLastActivity() {
+        lastActivity = Date()
+    }
+    
+    /// Il watchdog verifica se lo stream è muto oltre la soglia idle: in tal
+    /// caso marca il flag e cancella il task di CONNESSIONE della propria
+    /// generazione (mai `self.task`, che può già appartenere a una `connect()`
+    /// successiva). Lo stream viene chiuso con un errore per forzare il caller
+    /// a riconnettersi.
+    /// - Parameter connectionTask: task di connessione di questa generazione.
+    /// - Returns: true se il watchdog è scattato.
+    private func checkIdleAndMarkWatchdog(_ connectionTask: Task<Void, Never>?) -> Bool {
+        if Date().timeIntervalSince(lastActivity) > TimeInterval(idleTimeoutMS) / 1_000 {
+            watchdogFired = true
+            connectionTask?.cancel()
+            return true
+        }
+        return false
+    }
+    
+    /// Legge (senza resettare) il flag del watchdog.
+    private func watchdogHasFired() -> Bool {
+        watchdogFired
     }
     
     private func handleConnectionError(_ error: Error) {
