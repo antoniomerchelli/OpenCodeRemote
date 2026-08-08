@@ -146,34 +146,42 @@ final class StressF6Tests: XCTestCase {
         }
     }
 
-    /// `connect()` verso 127.0.0.1:1 (porta chiusa): deve LANCIARe subito
-    /// (rifiuto di connessione → `.transport` via `ServerError.normalize`,
-    /// mai `.timeout`) e NON appendere. La guardia: timeout di fulfillment
-    /// 20s > 8s `wsOpenTimeoutMS` — se connect si appendesse, il test fallisce.
-    /// Dopo il fallimento `websocketTask` deve restare nil: `send` lancia
-    /// ancora `.invalidResponse`.
+    /// `connect()` verso 127.0.0.1:1 (porta chiusa): deve LANCIARe (rifiuto di
+    /// connessione → `.transport` via `ServerError.normalize`) e NON appendere.
+    /// La guardia: timeout di fulfillment 20s > 8s `wsOpenTimeoutMS` — se
+    /// connect si appendesse, il test fallisce. L'errore viene CATTURATO nel
+    /// Task e gli assert girano nel corpo del test (gli assert dentro un
+    /// `Task {}` non sono garantiti attribuiti al test: `XCTestCase.current`
+    /// è thread-local — lezione Red Team F6). `URLSession` ephemeral per non
+    /// ereditare proxy/cache di sistema. In ambienti con firewall che DROPPA
+    /// i pacchetti (Little Snitch, VPN) il rifiuto può diventare `.timeout`
+    /// dopo `wsOpenTimeoutMS`: l'esito legittimo è transport|invalidResponse|
+    /// timeout — l'invariante vero è "errore, non hang, stato pulito".
     func test_ptyConnect_whenPortaChiusa127_0_0_1_1_shouldLanciareSenzaAppendere() async {
-        let client = PTYClient()
+        let client = PTYClient(session: URLSession(configuration: .ephemeral))
         let server = ServerConnection.testConnection(host: "127.0.0.1", port: 1)
-        let expectation = XCTestExpectation(description: "connect verso porta chiusa fallito")
+        let expectation = XCTestExpectation(description: "connect verso porta chiusa terminato")
 
         let connectTask = Task {
-            do {
-                _ = try await client.connect(server: server, ptyID: "pty-1", ticket: "ticket-1")
-                XCTFail("atteso throw: connessione a porta chiusa")
-            } catch let error as ServerError {
-                XCTAssertTrue(error.kind == .transport || error.kind == .invalidResponse,
-                              "atteso errore di trasporto/risposta, trovato \(error.kind)")
-                XCTAssertNotEqual(error.kind, .timeout,
-                                  "il rifiuto di connessione NON deve diventare un timeout")
-            } catch {
-                XCTFail("atteso ServerError, trovato \(error)")
-            }
+            let result: ServerError? = await {
+                do {
+                    _ = try await client.connect(server: server, ptyID: "pty-1", ticket: "ticket-1")
+                    return nil
+                } catch {
+                    return error as? ServerError
+                }
+            }()
             expectation.fulfill()
+            return result
         }
 
         await fulfillment(of: [expectation], timeout: 20)
-        _ = await connectTask.value
+        let error = await connectTask.value
+        XCTAssertNotNil(error, "atteso throw da connessione a porta chiusa")
+        XCTAssertTrue(
+            error?.kind == .transport || error?.kind == .invalidResponse || error?.kind == .timeout,
+            "atteso errore di trasporto/risposta/timeout, trovato \(String(describing: error?.kind))"
+        )
 
         do {
             try await client.send(text: "ls")
@@ -187,34 +195,37 @@ final class StressF6Tests: XCTestCase {
     }
 
     /// `close()` invocato MENTRE un `connect()` verso porta chiusa è in volo:
-    /// nessun crash, il connect lancia comunque e lo stato finale resta
-    /// integro (`send` → `.invalidResponse`). La race close/connect è
-    /// gestita dall'actor: close cancella/chiude ciò che trova (anche nulla)
-    /// senza corrompere il connect in corso.
+    /// nessun crash e stato finale integro. La race close/connect con porta
+    /// APERTA (il connect che riapre dopo la chiusura) è coperta dal fix di
+    /// produzione: guardia `if isClosed` in `PTYClient.connect` dopo
+    /// `openWebSocket`. Qui la porta è chiusa: `openWebSocket` lancia prima di
+    /// raggiungere la guardia, quindi verifichiamo solo assenza di crash,
+    /// terminazione del connect e stato pulito (`send` → `.invalidResponse`).
     func test_ptyClose_whenDuranteConnectFallito_shouldNonCorrompereStato() async {
-        let client = PTYClient()
+        let client = PTYClient(session: URLSession(configuration: .ephemeral))
         let server = ServerConnection.testConnection(host: "127.0.0.1", port: 1)
         let started = XCTestExpectation(description: "connect avviato")
         let finished = XCTestExpectation(description: "connect terminato")
 
         let connectTask = Task {
             started.fulfill()
-            do {
-                _ = try await client.connect(server: server, ptyID: "pty-2", ticket: "ticket-2")
-                XCTFail("atteso throw: connessione a porta chiusa")
-            } catch let error as ServerError {
-                XCTAssertTrue(error.kind == .transport || error.kind == .invalidResponse,
-                              "atteso errore di trasporto/risposta, trovato \(error.kind)")
-            } catch {
-                XCTFail("atteso ServerError, trovato \(error)")
-            }
+            let result: ServerError? = await {
+                do {
+                    _ = try await client.connect(server: server, ptyID: "pty-2", ticket: "ticket-2")
+                    return nil
+                } catch {
+                    return error as? ServerError
+                }
+            }()
             finished.fulfill()
+            return result
         }
 
         await fulfillment(of: [started], timeout: 10)
         await client.close()
         await fulfillment(of: [finished], timeout: 20)
-        _ = await connectTask.value
+        let error = await connectTask.value
+        XCTAssertNotNil(error, "atteso throw: connessione a porta chiusa")
 
         do {
             try await client.send(text: "ls")
@@ -329,12 +340,10 @@ final class StressF6Tests: XCTestCase {
     func test_revertCommit_when200ConClientMock_shouldTrueSempre() async throws {
         let root = try XCTUnwrap(tempDir, "tempDir mancante: setUp fallita")
         let counter = LockedCounter()
+        let recorder = LockedRequestRecorder()
         MockURLProtocol.responseHandler = { request in
+            recorder.record(request)
             counter.increment()
-            XCTAssertEqual(request.httpMethod, "POST",
-                           "il commit deve essere una POST")
-            XCTAssertEqual(request.url?.path, "/api/session/stress-1/revert/commit",
-                           "il commit deve colpire la rotta revert/commit")
             let response = HTTPURLResponse(url: request.url!, statusCode: 200,
                                            httpVersion: nil,
                                            headerFields: ["Content-Type": "application/json"])!
@@ -351,6 +360,10 @@ final class StressF6Tests: XCTestCase {
         }
 
         XCTAssertEqual(counter.value(), 200, "una chiamata POST per ogni commit")
+        XCTAssertEqual(recorder.allMethods(), Array(repeating: "POST", count: 200),
+                       "tutti i commit devono essere POST")
+        XCTAssertEqual(recorder.allPaths(), Array(repeating: "/api/session/stress-1/revert/commit", count: 200),
+                       "tutti i commit devono colpire la rotta revert/commit")
     }
 
     // MARK: 3. FILE LIST / FIND
@@ -381,9 +394,9 @@ final class StressF6Tests: XCTestCase {
             ])
         }
         let payload = try JSONSerialization.data(withJSONObject: root)
+        let recorder = LockedRequestRecorder()
         MockURLProtocol.responseHandler = { request in
-            XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.url?.path, "/api/file")
+            recorder.record(request)
             let response = HTTPURLResponse(url: request.url!, statusCode: 200,
                                            httpVersion: nil,
                                            headerFields: ["Content-Type": "application/json"])!
@@ -403,6 +416,8 @@ final class StressF6Tests: XCTestCase {
         let paths = StressF6Tests.collectPaths(entries)
         XCTAssertEqual(paths.count, 5_000, "tutti i path devono essere raccolti")
         XCTAssertEqual(Set(paths).count, 5_000, "i path devono essere unici: nessun doppione")
+        XCTAssertEqual(recorder.allMethods(), ["GET"], "fileList deve usare GET")
+        XCTAssertEqual(recorder.allPaths(), ["/api/file"], "fileList deve colpire GET /api/file")
         XCTAssertTrue(elapsed < .seconds(30),
                       "decodifica di 5000 nodi annidati in <30s (bound largo, impiegato \(elapsed))")
     }
@@ -413,9 +428,9 @@ final class StressF6Tests: XCTestCase {
     func test_fileFind_when10000Risultati_shouldNessunaPerditaNéDoppioni() async throws {
         let expected = (0..<10_000).map { "src/file-\($0).swift" }
         let payload = try JSONSerialization.data(withJSONObject: expected)
+        let recorder = LockedRequestRecorder()
         MockURLProtocol.responseHandler = { request in
-            XCTAssertEqual(request.httpMethod, "GET")
-            XCTAssertEqual(request.url?.path, "/api/file/find")
+            recorder.record(request)
             let response = HTTPURLResponse(url: request.url!, statusCode: 200,
                                            httpVersion: nil,
                                            headerFields: ["Content-Type": "application/json"])!
@@ -431,6 +446,8 @@ final class StressF6Tests: XCTestCase {
         XCTAssertEqual(found.first, "src/file-0.swift")
         XCTAssertEqual(found.last, "src/file-9999.swift")
         XCTAssertEqual(found, expected, "contenuto e ordine devono essere preservati integralmente")
+        XCTAssertEqual(recorder.allMethods(), ["GET"], "fileFind deve usare GET")
+        XCTAssertEqual(recorder.allPaths(), ["/api/file/find"], "fileFind deve colpire GET /api/file/find")
     }
 
     /// Wire reale: il server 1.18 serve `{"files":[...]}` (envelope object),
@@ -441,8 +458,9 @@ final class StressF6Tests: XCTestCase {
         let expected = (0..<500).map { "src/file-\($0).swift" }
         let envelope: [String: Any] = ["files": expected]
         let payload = try JSONSerialization.data(withJSONObject: envelope)
+        let recorder = LockedRequestRecorder()
         MockURLProtocol.responseHandler = { request in
-            XCTAssertEqual(request.url?.path, "/api/file/find")
+            recorder.record(request)
             let response = HTTPURLResponse(url: request.url!, statusCode: 200,
                                            httpVersion: nil,
                                            headerFields: ["Content-Type": "application/json"])!
@@ -458,6 +476,8 @@ final class StressF6Tests: XCTestCase {
         XCTAssertEqual(found, expected,
                        "la forma {files:[...]} (wire reale) deve decodificare identica alla forma array")
         XCTAssertEqual(found.first, "src/file-0.swift")
+        XCTAssertEqual(recorder.allMethods(), ["GET"], "fileFind deve usare GET")
+        XCTAssertEqual(recorder.allPaths(), ["/api/file/find"], "fileFind deve colpire GET /api/file/find")
         XCTAssertEqual(found.last, "src/file-499.swift")
     }
 }
@@ -481,5 +501,36 @@ private final class LockedCounter: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return _count
+    }
+}
+
+/// Registratore di metodo+path delle richieste servite da `MockURLProtocol`.
+/// Gli `XCTAssert*` DENTRO il `responseHandler` NON sono garantiti attribuiti
+/// al test (il handler gira sui thread di URLSession, dove `XCTestCase.current`
+/// è assente — lezione Red Team F6): si registra qui e si verifica NEL CORPO
+/// del test, dopo l'await. Thread-safe con lock (stesso pattern di
+/// `SnapshotResponseQueue`).
+private final class LockedRequestRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var methods: [String] = []
+    private var paths: [String] = []
+
+    func record(_ request: URLRequest) {
+        lock.lock()
+        defer { lock.unlock() }
+        methods.append(request.httpMethod ?? "")
+        paths.append(request.url?.path ?? "")
+    }
+
+    func allMethods() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return methods
+    }
+
+    func allPaths() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return paths
     }
 }
