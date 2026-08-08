@@ -108,9 +108,11 @@ la richiesta sulla rotta v1.
 
 ## 4. Stato del progetto
 
-**185/185 test verdi**, build iOS Simulator OK. **Tutto committato e pushato
-su `origin/main`** (sessioni 18 + 19). **Test definitivo LiveE2E 13/13** contro
-il server reale. Il collegamento app → iPhone NON è ancora verificato dal vivo.
+**394/394 test verdi**, build macOS OK. Sessioni 18+19 committate e pushate su
+`origin/main`; il lavoro della sessione 22 (fix body model v2/v1, check
+LiveE2E 14-26) è nel working tree, NON committato. **Test definitivo LiveE2E
+27/27** contro il server reale. Il collegamento app → iPhone NON è ancora
+verificato dal vivo.
 
 ```
 P1 [✅ COMMITTATO]       Fallback automatico v1 per remove/shell/command (commit 026f82c)
@@ -123,6 +125,8 @@ P7 [✅ COMPLETATO]       Wire shell v1 allineato al reale + test
 P8 [✅ COMPLETATO]       Wire command v1 allineato al reale + test
 P9 [✅ COMMITTATO+PUSHATO] Fix sessione 18: Terminal + fallback shell/command wire reale
 P10 [✅ COMPLETATO]      Test definitivo LiveE2E 13/13 + 3 bug wire corretti (sessione 19)
+P11 [⚠️ NON COMMITTATO]  Sessione 22: LiveE2E 27/27, fix body model v2/v1 (id vs modelID),
+                        ModelRefV1Body, HTMLFallbackError public, 3 limiti 1.18 documentati
 ```
 
 ## 5. Modifiche sessione 18 (COMMITTATE E PUSHATE — commit 8338e19, 7f3ca02, 16518c0)
@@ -181,6 +185,34 @@ Regressione: `Tests/OpenCodeRemoteTests/RealWireDecodingTests.swift` (4 test).
 command non attende il completamento del turno (timeout = "accettata, no 4xx"
 → PASS); dopo un run completo controllare `git status` (artefatto rimosso).
 
+## 5c. Sessione 22 — LiveE2E 27/27, fix body model v2/v1, 3 limiti 1.18 (NON COMMITTATO)
+
+**LiveE2E esteso a 27 check** (14-26 nuovi: turno reale con poll messageList,
+persistenza, rename, switch agent/model, interrupt, session active, provider
+list, permission list, PTY REST, revert stage/clear, history, SSE fine turno).
+**`swift run LiveE2E --host 127.0.0.1 --port 4096` → 27/27, exit 0.**
+
+Fix wire reali (diagnosi via curl sul server 1.18.15):
+1. **L'oggetto `model` ha chiavi SPECULARI**: v2 (`POST /api/session/:id/model`,
+   prompt, create) vuole `{model: {id, providerID}}` (`modelID` → 400
+   `Missing key [model][id]`); v1 (`POST /session/:id/shell`) vuole
+   `{model: {providerID, modelID}}` (`id` → 400 `Missing key [model][modelID]`).
+   → `ModelRefV2` codifica `id` (CodingKey `modelID = "id"`), nuovo
+   `ModelRefV1Body` per i body v1 (`ShellExecuteBody`, `V1ShellBody`).
+   File: `Sources/OpenCodeRemote/Models/DTOV2.swift`,
+   `Sources/OpenCodeRemote/Services/APIClient.swift`,
+   `Sources/OpenCodeRemote/Services/OpenCodeAPIClientV2.swift`.
+2. **`GET /api/session/:id/message` è in ordine DESCENDENTE** (assistant PRIMA
+   dello user): un poll con `messages.last` non scatta mai (last = user).
+   → `first(where: assistant && time.completed != nil)`.
+3. **`HTMLFallbackError` reso public** (era private) per la diagnosi nei check.
+4. Check 14 robusto ai turni LLM reali: la condizione di completamento è SOLO
+   `time.completed` (il testo può mancare: content solo reasoning sotto carico);
+   il timeout distingue LLM lento / finestra finale / bug reale.
+5. Regressione: assert sulla chiave `id` nel body echo di
+   `testSwitchModel_whenMockServer_shouldNotThrow` (chiude il buco di copertura
+   che aveva permesso il bug del body model).
+
 ## 6. Problemi noti e rischi
 
 1. **[RISOLTO] Disallineamento wire shell/command v1** — i fixture dei test
@@ -199,6 +231,20 @@ command non attende il completamento del turno (timeout = "accettata, no 4xx"
    usa lo stato dal modello, nessun break funzionale.
 6. **[BASSO] `POST /api/session/:id/shell` e `command` (v2) assenti** — il
    server risponde HTML; il fallback v1 è il percorso usato (ora corretto).
+7. **[NUOVO — LIMITI SERVER 1.18, verificati dal vivo] `rename` NON esiste via
+   REST** — `POST /api/session/:id/rename`, `PUT /api/session/:id` e
+   `POST /session/:id/title` rispondono TUTTE la SPA HTML (200 con body HTML).
+   L'app deve mostrare "rinomina non disponibile", non un errore. Da riverificare
+   su un server futuro.
+8. **[NUOVO — LIMITE SERVER 1.18] `PATCH /api/pty/:id` (resize) assente** —
+   SPA HTML; `GET`/`DELETE /api/pty/:id` funzionano. Il client ha già il
+   fallback v1 per la shell; il resize è l'unica funzione pty mancante.
+9. **[RISCHIO APERTO — Red Team S22] chiave `model` della v2 shell/command**:
+   `SessionShellV2`/`SessionCommandV2` ora codificano `model: {id, providerID}`.
+   Verificato sul 1.18 SOLO per il fallback v1 (HTML). Su un server che
+   implementa davvero la v2 shell va verificato che accetti `id` (se volesse
+   `modelID` il 400 NON farebbe scattare il fallback, che reagisce solo
+   all'HTML).
 
 ## 7. Collegamento app → iPhone
 
