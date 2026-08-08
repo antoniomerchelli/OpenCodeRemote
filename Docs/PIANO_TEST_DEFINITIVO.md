@@ -12,11 +12,12 @@ NON usare i documenti storici a root (obsoleti).
 
 ## 0. Stato di partenza (verificato il 8 ago 2026)
 
-- `swift build` ✅ · `swift test` **394/394** ✅ · `swift run LiveE2E` **27/27** ✅
+- `swift build` ✅ · `swift test` **423/423** ✅ (ora **436/436** con F6+F7) ·
+  `swift run LiveE2E` **27/27** ✅
 - Server reale 1.18.15 attivo su `127.0.0.1:4096`
-- MockServer: ~28 rotte implementate; client v2: ~50 metodi (gap ~12 rotte)
-- Git: 1 commit locale non pushatto (`cb10bac`) + working tree S22 + 17 file di
-  test untracked — **da committare e pushare (Fase 1)**
+- MockServer: 40/40 rotte implementate; client v2: gap 0 (F4)
+- Git: tutto committato e pushato su `origin/main` (ultimo commit F6/F7:
+  `bf71383`; commit Fase A `0afb550`). Working tree pulito.
 
 ---
 
@@ -31,12 +32,12 @@ NON usare i documenti storici a root (obsoleti).
 
 ### Fase 1 — Igiene repository (prima di tutto)
 **Deliverable:** repo pulito, tutto committato e pushatto.
-- [ ] Commit `cb10bac` (fix Red Team) → push
-- [ ] Commit working tree S22 (fix wire model v2/v1, LiveE2E 27 check, MockServer, docs)
-- [ ] Commit 17 file di test untracked (mai committati — rischio perdita)
-- [ ] Decidere sorte `AGENTS.md` (artefatto `/init` ma usato come istruzioni di progetto)
-- [ ] Verificare `Package.swift` senza target fantasma
-- [ ] Verifica: `swift build` + `swift test` post-commit
+- [x] Commit `cb10bac` (fix Red Team) → push
+- [x] Commit working tree S22 (fix wire model v2/v1, LiveE2E 27 check, MockServer, docs)
+- [x] Commit 17 file di test untracked (mai committati — rischio perdita)
+- [x] Decidere sorte `AGENTS.md` (artefatto `/init` ma usato come istruzioni di progetto)
+- [x] Verificare `Package.swift` senza target fantasma
+- [x] Verifica: `swift build` + `swift test` post-commit
 
 ### Fase 2 — F4: Integration MockServer completa (happy + error)
 **Deliverable:** ogni rotta del client v2 ha una controparte mock con happy path
@@ -57,24 +58,27 @@ e almeno un error path; test di integrazione per ciascuna.
 
 ### Fase 3 — F7: Fix robustezza residui
 **Deliverable:** i rischi noti di robustezza chiusi o documentati come scelte.
-- [ ] **SSE v1 idle watchdog** (stream v1 senza heartbeat: il client non deve
+- [x] **SSE v1 idle watchdog** (stream v1 senza heartbeat: il client non deve
   morire per idle timeout)
-- [ ] **Timeout flat 30s v1** → timeout per-funzione configurabile/adeguato
-- [ ] **Race AppState più profonda** (connect/disconnect multi-generazione: audit
+- [x] **Timeout flat 30s v1** → timeout per-funzione configurabile/adeguato
+- [x] **Race AppState più profonda** (connect/disconnect multi-generazione: audit
   di tutti i path async oltre a `connectV2`/`disconnectV2`)
-- [ ] **Rischio wire aperto (Red Team S22):** chiave `model` della v2
-  shell/command — su server che implementa la v2, verificare che accetti `id`.
-  Fino a prova contraria: documentare + fallback v1 già corretto
-- [ ] Audit force-unwrap residui (`!` runtime) → 0
-- [ ] Audit secret hardcoded / credenziali in log
+- [x] **Rischio wire model v2 shell/command — CHIUSO PER DOCUMENTAZIONE + TEST:**
+  body encoded v2 (shell+command) con `model.id`/`providerID`, fallback v1 con
+  `modelID` (shell oggetto / command stringa), `HTMLFallbackError`; da
+  riverificare su un server che implementa la v2 (criterio in
+  `Docs/IMPLEMENTATION_PLAN_F6_F7.md` §6.3)
+- [x] Audit force-unwrap residui (`!` runtime) → 0
+- [x] Audit secret hardcoded / credenziali in log
 
 ### Fase 4 — F6: Stress esteso
 **Deliverable:** suite stress ampliata sui path coperti in F4/F7, 3x verde.
-- [ ] Stress su pty pool (create/update/remove concorrenti)
-- [ ] Stress su revert staging (stage/clear/commit ripetuti)
-- [ ] Stress su file list/find (payload grandi)
-- [ ] Stress su eviction store (sessioni > limite, rilettura)
-- [ ] 3 run consecutivi verdi (niente flaky)
+- [x] Stress su pty pool (create/update/remove concorrenti)
+- [x] Stress su revert staging (stage/clear/commit ripetuti)
+- [x] Stress su file list/find (payload grandi)
+- [x] Stress su eviction store (sessioni > limite, rilettura) — già coperta da
+  `StressStoreTests`
+- [x] 3 run consecutivi verdi (niente flaky)
 
 ### Fase 5 — F8: CI + View-model extraction
 **Deliverable:** CI verde su ogni push; UI decouplata da AppState.
@@ -104,17 +108,18 @@ e almeno un error path; test di integrazione per ciascuna.
 
 | Metrica | Attuale | Target |
 |---|---|---|
-| Test unitari `swift test` | 421 | 394 + nuovi (F4/F6/F8) |
+| Test unitari `swift test` | 436 | 394 + nuovi (F4/F6/F8) |
 | Check LiveE2E vs server reale | 27/27 | 27/27 invariato (o più) |
 | Rotte mock | ~40 (tutte v2 client) | tutte quelle del client v2 (~40) |
-| Stress 3x | 3/3 | 3/3 (suite ampliata) |
+| Stress 3x | 3/3 (suite ampliata: 86 = 74 + 12) | 3/3 |
 | CI | assente | verde su push |
 | Force-unwrap runtime | 0 | 0 |
 
 ## 3. Rischi
 
 1. **Wire model v2 shell/command** non verificabile sul 1.18 (rotta v2 assente) —
-   mitigazione: fallback v1 corretto, documentazione, test mock della v2.
+   mitigazione completata (test + documentazione, vedi Fase 3 F7), verifica su
+   server v2 futuro pendente (criterio §6.3 del piano F6/F7).
 2. **Turni LLM reali 2s→180s+** e testo vuoto (solo reasoning) — i check E2E non
    devono asserire il testo (lezione S22.6/7).
 3. **Flaky per timing** — invarianti robusti, mai assert su timing esatti

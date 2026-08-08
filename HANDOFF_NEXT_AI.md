@@ -108,17 +108,19 @@ la richiesta sulla rotta v1.
 
 ## 4. Stato del progetto
 
-**423/423 test verdi** (`swift test`, 37 suite), build macOS OK, **LiveE2E
+**436/436 test verdi** (`swift test`), build macOS OK, **LiveE2E
 27/27** contro il server reale 1.18.15 (rilanciato e verificato il 8 ago 2026,
-exit 0). Tutto committato e pushato su `origin/main` (ultimo commit `12e9cee`,
-F7). Fasi completate del piano `Docs/PIANO_TEST_DEFINITIVO.md`: F0–F3 (fondamenta
+exit 0). Tutto committato e pushato su `origin/main` (ultimo commit `bf71383`,
+F6). Fasi completate del piano `Docs/PIANO_TEST_DEFINITIVO.md`: F0–F3 (fondamenta
 + client v2 + streaming + fixture wire), Fase 1 igiene repo, F4 (MockServer
 40/40 rotte + 27 test integration, commit `20cc13d`), F7 (robustezza: watchdog
 SSE v1, connect timeout, timeout per-funzione v1, race AppState, 2 test wire
-model, commit `12e9cee`). Force-unwrap runtime nel core: 0. In corso: F6 (stress
-sui path F4/F7 — file `StressF6Tests.swift` da creare). Non fatti: F8 (CI +
-view-model), F9 (verifica finale + docs), L4/L5 (Simulator/iPhone — dipende da
-hardware). Il collegamento app → iPhone NON è ancora verificato dal vivo.
+model, commit `12e9cee`; chiusa con gap test fallback + documentazione rischio
+wire, commit `0afb550`), **F6 COMPLETATA** (12 test stress in
+`StressF6Tests.swift`, commit `bf71383`, suite stress 74 → 86). Force-unwrap
+runtime nel core: 0. Non fatti: F8 (CI + view-model), F9 (verifica finale +
+docs), L4/L5 (Simulator/iPhone — dipende da hardware). Il collegamento app →
+iPhone NON è ancora verificato dal vivo.
 
 ```
 P1 [✅ COMMITTATO]       Fallback automatico v1 per remove/shell/command (commit 026f82c)
@@ -135,6 +137,8 @@ P11 [✅ COMMITTATO+PUSHATO] Sessione 22: LiveE2E 27/27, fix body model v2/v1 (i
                         ModelRefV1Body, HTMLFallbackError public, 3 limiti 1.18 documentati
 P12 [✅ COMMITTATO+PUSHATO] F4: MockServer 40/40 rotte client v2 + 27 test integration (20cc13d)
 P13 [✅ COMMITTATO+PUSHATO] F7: robustezza SSE v1 + timeout per-funzione + race AppState (12e9cee)
+P14 [✅ COMMITTATO+PUSHATO] Chiusura F6/F7: 12 test stress F6 (StressF6Tests.swift, bf71383) +
+                        test fallback v1 command con model stringa (0afb550) + doc rischio wire v2
 ```
 
 ## 5. Modifiche sessione 18 (COMMITTATE E PUSHATE — commit 8338e19, 7f3ca02, 16518c0)
@@ -247,12 +251,18 @@ Fix wire reali (diagnosi via curl sul server 1.18.15):
 8. **[NUOVO — LIMITE SERVER 1.18] `PATCH /api/pty/:id` (resize) assente** —
    SPA HTML; `GET`/`DELETE /api/pty/:id` funzionano. Il client ha già il
    fallback v1 per la shell; il resize è l'unica funzione pty mancante.
-9. **[RISCHIO APERTO — Red Team S22] chiave `model` della v2 shell/command**:
-   `SessionShellV2`/`SessionCommandV2` ora codificano `model: {id, providerID}`.
-   Verificato sul 1.18 SOLO per il fallback v1 (HTML). Su un server che
-   implementa davvero la v2 shell va verificato che accetti `id` (se volesse
-   `modelID` il 400 NON farebbe scattare il fallback, che reagisce solo
-   all'HTML).
+9. **[CHIUSO IN F7 — Red Team S22] chiave `model` della v2 shell/command**:
+   `SessionShellV2`/`SessionCommandV2` codificano `model: {id, providerID}`.
+   Chiuso con test (F7): `testCommand_whenModelSpecified_shouldFallbackBodyUseModelAsString`
+   (body fallback v1 command con `model` = stringa modelID),
+   `testShellFallsBackToV1Route` (assert `model["id"] == nil`: v1 usa `modelID`,
+   mai `id`) e i 2 test encoded v2
+   `testShell_whenModelSpecified_shouldEncodeModelAsID` /
+   `testCommand_whenModelSpecified_shouldEncodeModelAsID`. Verificato sul 1.18
+   SOLO per il fallback v1 (HTML). Gap residuo: verifica su un server che
+   implementa davvero la v2 shell/command (criterio §6.3 del piano F6/F7: se
+   volesse `modelID`, il 400 NON farebbe scattare il fallback, che reagisce solo
+   all'HTML → da riverificare).
 
 ## 7. Collegamento app → iPhone
 
@@ -310,15 +320,15 @@ Passi:
 
 ## 9. Prossimi passi
 
-1. **F6 — Stress sui path F4/F7** (prossimo): creare
-   `Tests/OpenCodeRemoteTests/StressF6Tests.swift` — (a) pty lifecycle:
-   `close()` ripetuti/concorrenti, `send` non connesso → `.invalidResponse`,
-   `connect` verso porta chiusa (127.0.0.1:1) che deve lanciare; (b) revert
-   staging: 200 sessioni stage→clear→stage + stage concorrente stessa sessione
-   (l'actor serializza, ultimo scrittore vince) + commit senza client → false;
-   (c) file list/find: 5000 entry annidate / 10000 risultati. Eviction store
-   GIÀ coperta da `StressStoreTests`. Poi `swift build` + `swift test` + 3x
-   verde consecutivi.
+1. **F6 — Stress sui path F4/F7**: **COMPLETATA** (commit `bf71383`).
+   `Tests/OpenCodeRemoteTests/StressF6Tests.swift` con 12 test in 3 gruppi:
+   (a) pty lifecycle (close ripetuti/concorrenti, send non connesso →
+   `.invalidResponse`, connect porta chiusa 127.0.0.1:1); (b) revert staging
+   (200 sessioni stage→clear→stage + durabilità, stage concorrente stessa
+   sessione → ultimo scrittore vince, commit senza client → false, commit con
+   mock → true); (c) file list/find (5000 entry annidate / 10000 risultati,
+   entrambe le forme). Suite stress 74 → **86**, 3x verde consecutivi.
+   **Prossimo passo: F8.**
 2. **F8 — CI + view-model**: GitHub Actions (`macos-latest`, `swift build` +
    `swift test`; LiveE2E opzionale vs mock) + estrazione view-model da
    `AppState` per chat/terminal/file/settings + test dei view-model.
