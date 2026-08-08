@@ -19,7 +19,13 @@ public struct LocationV2: Codable, Equatable, Hashable, Sendable {
 }
 
 /// Riferimento a un modello: `{ providerID, modelID, variant? }`.
-public struct ModelRefV2: Codable, Equatable, Hashable, Sendable {
+///
+/// Solo `Encodable` (mai `Decodable`): la `CodingKey` `modelID = "id"` è una
+/// mina se un domani qualcuno decodifica un JSON v1-shape in questo tipo
+/// (fallimento criptico). Non esiste alcun sito di decodifica nel codebase;
+/// renderlo `Decodable` richiederebbe un `init(from:)` esplicito con verifica.
+/// `Hashable` è richiesto dalle struct di request (SessionShellV2 ecc.).
+public struct ModelRefV2: Encodable, Hashable, Sendable {
     public var providerID: String
     public var modelID: String
     public var variant: String?

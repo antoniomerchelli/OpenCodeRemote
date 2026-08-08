@@ -31,7 +31,10 @@ public enum HTMLFallbackError: Error, Equatable {
 /// — NON `agentId`/`modelId` (400 `Missing key ["agent"]`).
 private struct V1ShellBody: Encodable, Equatable, Hashable, Sendable {
     let command: String
-    let agent: String?
+    // Wire reale 1.18: chiave `agent` OBBLIGATORIA (400 `Missing key ["agent"]`
+    // se assente) — non-opzionale per rendere l'errore un problema di
+    // compilazione, non un 400 a runtime.
+    let agent: String
     let model: ModelRefV1Body?
 }
 
@@ -276,9 +279,14 @@ public actor OpenCodeAPIClientV2 {
                     if array.isEmpty { return nil }
                 } else if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     if object.isEmpty { return nil }
-                    if object.count == 1, let nested = object["data"] {
+                    // Envelope `{"data": ...}` = assenza quando `data` è vuoto
+                    // o null (forme osservate dal vivo: `{"data":{}}`, `[]`).
+                    // NON richiedere `object.count == 1`: il wire può aggiungere
+                    // chiavi (es. `cursor`) accanto a `data` (edge non gestito).
+                    if let nested = object["data"] {
                         if let arr = nested as? [Any], arr.isEmpty { return nil }
                         if let dict = nested as? [String: Any], dict.isEmpty { return nil }
+                        if nested is NSNull { return nil }
                     }
                 }
             }

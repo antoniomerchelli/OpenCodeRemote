@@ -114,6 +114,13 @@ actor EventBox {
     func hasLabelContaining(_ needle: String) -> Bool {
         items.contains { eventLabel($0).contains(needle) }
     }
+    /// Evento di FINE turno reale: `message.updated` (il wire 1.18 conferma il
+    /// messaggio user via message.updated con lo stesso id del prompt, lezione
+    /// S15.3). Predicato esatto, NON `contains("updated")`: `usage.updated`,
+    /// `todo.updated`, `message.part.updated` arrivano anche a inizio turno.
+    func hasMessageUpdated() -> Bool {
+        items.contains { eventLabel($0) == "message.updated" }
+    }
 }
 
 /// Testo del primo part testuale di un messaggio assistant (o `text` top-level
@@ -470,19 +477,29 @@ do {
             request: SessionPromptV2(id: "turn-\(ts)-\(UUID().uuidString.prefix(4))", prompt: "Rispondi solo con la parola OK.")
         )
     }
-    let finalText: String? = try? await withTimeout(180) {
-        while true {
-            let list = try await v2.messageList(id: session.id)
-            // Wire reale 1.18: messageList è in ordine DESCENDENTE (l'assistant
-            // del turno è il PRIMO dell'array, non l'ultimo — `last` è lo user).
-            // Il completamento del turno è segnalato SOLO da `time.completed`
-            // (il testo può mancare se l'assistant ha solo reasoning/tool —
-            // condizione = completed, il testo è un VALORE da verificare dopo).
-            if let done = list.messages.first(where: { $0.type == "assistant" && $0.time?.completed != nil }) {
-                return extractText(done) ?? ""
+    // `pollError` distingue "timeout puro del withTimeout" da "errore di rete
+    // nell'ultimo poll": nel secondo caso la diagnosi non deve incolpare il poll
+    // (bug poll/DTO) per un hiccup di rete (Red Team S22).
+    var pollError: Error?
+    let finalText: String?
+    do {
+        finalText = try await withTimeout(180) {
+            while true {
+                let list = try await v2.messageList(id: session.id)
+                // Wire reale 1.18: messageList è in ordine DESCENDENTE (l'assistant
+                // del turno è il PRIMO dell'array, non l'ultimo — `last` è lo user).
+                // Il completamento del turno è segnalato SOLO da `time.completed`
+                // (il testo può mancare se l'assistant ha solo reasoning/tool —
+                // condizione = completed, il testo è un VALORE da verificare dopo).
+                if let done = list.messages.first(where: { $0.type == "assistant" && $0.time?.completed != nil }) {
+                    return extractText(done) ?? ""
+                }
+                try await Task.sleep(nanoseconds: 2_000_000_000)
             }
-            try await Task.sleep(nanoseconds: 2_000_000_000)
         }
+    } catch {
+        pollError = error
+        finalText = nil
     }
     let elapsed = Int(Date().timeIntervalSince(turnStart))
     if let finalText, finalText.lowercased().contains("ok") {
@@ -493,9 +510,12 @@ do {
         // (può essere vuoto se il content ha solo reasoning/tool — osservato
         // sotto carico) → pass documentato, non fail.
         check.pass("turno completo (poll)", "\(elapsed)s, completamento rilevato; testo LLM: '\(finalText.prefix(60))'")
+    } else if let pollError, !(pollError is TimeoutError) {
+        // Errore (rete/decodifica) nell'ultimo poll, non timeout: diagnosi onesta.
+        check.fail("turno completo (poll)", "errore nel polling del turno: \(pollError)")
     } else {
-        // Timeout (o errore): distinguere LLM lento da bug del client — se il
-        // wire ESPONE un assistant completato con testo, il poll avrebbe dovuto
+        // Timeout puro: distinguere LLM lento da bug del client — se il wire
+        // ESPONE un assistant completato con testo, il poll avrebbe dovuto
         // scattare (fail); se l'assistant è ancora in corso (completed nil) il
         // turno LLM reale non è concluso entro 180s (varia da secondi a minuti,
         // lezione S19.4) → pass documentato, la persistenza è verificata dal
@@ -564,14 +584,17 @@ do {
         check.fail("rename reale", "\(error)")
     }
 
-    // 17. switch agent (explore è un agente reale del server 1.18)
+    // 17. switch agent (primo agente non-build dalla lista REALE: "explore"
+    // hardcoded fallirebbe su un server 1.18 senza quell'agente — Red Team S22)
     do {
-        try await v2.switchAgent(sessionID: session.id, agent: "explore")
+        let agents = try await withTimeout(20) { try await v1.listAgents() }
+        let target = agents.first(where: { $0.name != "build" })?.name ?? "build"
+        try await v2.switchAgent(sessionID: session.id, agent: target)
         let got = try await v2.get(session.id)
-        if got.agent == "explore" {
-            check.pass("switch agent reale", "agent → explore")
+        if got.agent == target {
+            check.pass("switch agent reale", "agent → \(target)")
         } else {
-            check.fail("switch agent reale", "atteso explore, got \(got.agent ?? "nil")")
+            check.fail("switch agent reale", "atteso \(target), got \(got.agent ?? "nil")")
         }
     } catch {
         check.fail("switch agent reale", "\(error)")
@@ -632,6 +655,9 @@ do {
 // 23. PTY REST reale (create → list → get → update → remove)
 do {
     let created = try await v2.ptyCreate(PTYCreateV2(title: "live-e2e-\(ts)"))
+    // Cleanup garantito anche se ptyList/ptyGet/ptyUpdate lanciano (altrimenti
+    // la PTY resterebbe orfana sul server — Red Team S22).
+    defer { let ptyID = created.id; Task { try? await v2.ptyRemove(id: ptyID) } }
     let listed = try await v2.ptyList()
     let got = try await v2.ptyGet(id: created.id)
     do {
@@ -645,7 +671,6 @@ do {
     } catch {
         check.fail("pty update reale", "\(error)")
     }
-    try await v2.ptyRemove(id: created.id)
     if listed.contains(where: { $0.id == created.id }) && got.id == created.id {
         check.pass("pty REST reale", "create→get→remove (\(created.id.prefix(14))…)")
     } else {
@@ -665,11 +690,17 @@ if let sid = turnSessionID {
                 try await v2.revertClear(id: sid)
                 check.pass("revert stage/clear reali", "messageID \(first.id.prefix(14))…, state \(state == nil ? "nil" : "ok")")
             } catch let error as ServerError {
-                if error.kind == .api || error.kind == .sessionNotFound {
-                    check.pass("revert stage/clear reali", "errore wire documentato (4xx): \(error.kind)")
+                // 4xx documentati (.api/.sessionNotFound) E 5xx (.http, es.
+                // 500 UnknownError su sessione busy — comportamento reale,
+                // AGENTS.md) → pass documentato. Altri kind → fail.
+                if error.kind == .api || error.kind == .sessionNotFound || error.kind == .http {
+                    check.pass("revert stage/clear reali", "errore wire documentato (4xx/5xx): \(error.kind)")
                 } else {
                     check.fail("revert stage/clear reali", "\(error)")
                 }
+            } catch is HTMLFallbackError {
+                // Rotta revert assente su qualche patch 1.18.x → SPA HTML.
+                check.pass("revert stage/clear reali", "rotta revert assente sul server (SPA HTML) — limite documentato")
             }
         } else {
             check.pass("revert stage/clear reali", "nessun messaggio da staggiare (skip)")
@@ -708,6 +739,10 @@ do {
             await box.append(event)
         }
     }
+    // Teardown garantito anche se prompt/attesa lanciano: senza defer il task
+    // di stream (reconnect illimitato) resta vivo e la connessione SSE aperta
+    // (Red Team S22).
+    defer { collector.cancel(); Task { await sse.reset() } }
 
     _ = try await withTimeout(30) {
         try await compatible.prompt(
@@ -720,17 +755,14 @@ do {
     do {
         try await withTimeout(150) {
             while true {
-                if await box.hasLabelContaining("updated") { return }
+                if await box.hasMessageUpdated() { return }
                 try await Task.sleep(nanoseconds: 500_000_000)
             }
         }
         check.pass("SSE fine turno reale", "\(await box.count) eventi, message.updated ricevuto")
     } catch {
-        check.fail("SSE fine turno reale", "nessun evento updated in 150s: \(error)")
+        check.fail("SSE fine turno reale", "nessun message.updated in 150s: \(error)")
     }
-
-    collector.cancel()
-    await sse.reset()
 } catch {
     check.fail("SSE fine turno reale", "\(error)")
 }
