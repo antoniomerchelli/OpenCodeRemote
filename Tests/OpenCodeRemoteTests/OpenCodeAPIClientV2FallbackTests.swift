@@ -179,6 +179,7 @@ final class OpenCodeAPIClientV2FallbackTests: XCTestCase {
         let model = v1Body?["model"] as? [String: Any]
         XCTAssertEqual(model?["providerID"] as? String, "anthropic")
         XCTAssertEqual(model?["modelID"] as? String, "claude-3")
+        XCTAssertNil(model?["id"], "il body v1 della shell deve usare modelID, MAI id (chiavi speculari S22)")
     }
 
     /// Compat all'indietro: forma legacy con `parts` dentro `info` (mai usata
@@ -224,6 +225,40 @@ final class OpenCodeAPIClientV2FallbackTests: XCTestCase {
         // Wire reale v1: `arguments` è una STRINGA (il server rifiuta array).
         XCTAssertEqual(v1Body?["arguments"] as? String, "--all", "arguments deve essere stringa (joined)")
         XCTAssertEqual(responder.requestCount(on: "/session/ses_123/command"), 1)
+    }
+
+    /// Gap chiuso in F7: il fallback v1 della `command` con `model` specificato.
+    /// Wire reale 1.18: il body v1 usa `model` come STRINGA (il solo modelID,
+    /// chiave `modelID` speculare alla v2 `id` — lezione S22.2), mai oggetto.
+    /// Prima di questo test il path con `model` non era coperto da alcun test.
+    func testCommand_whenModelSpecified_shouldFallbackBodyUseModelAsString() async throws {
+        let responder = ScriptedResponder()
+        responder.enqueue(htmlBody, for: "/api/session/ses_123/command")
+        responder.enqueue(
+            #"{"info": {"id": "m-99", "sessionID": "ses_123", "role": "assistant", "time": {"created": 1720000000000}}, "parts": [{"type": "step-start"}, {"type": "text", "text": "ok"}, {"type": "step-finish"}]}"#,
+            for: "/session/ses_123/command"
+        )
+        responder.install()
+
+        let client = await makeClient(server: .testConnection())
+        let request = SessionCommandV2(
+            command: "status",
+            arguments: ["--all"],
+            model: ModelRefV2(providerID: "anthropic", modelID: "claude-3")
+        )
+        _ = try await client.command(id: "ses_123", request: request)
+
+        let requests = responder.allRequests()
+        XCTAssertEqual(requests.count, 2, "Attese 2 richieste: v2 (HTML) + fallback v1")
+        XCTAssertEqual(requests[0].url?.path, "/api/session/ses_123/command")
+        XCTAssertEqual(responder.requestCount(on: "/session/ses_123/command"), 1, "Il fallback v1 deve scattare una sola volta")
+
+        let v1Body = bodyDictionary(from: requests[1])
+        XCTAssertEqual(v1Body?["command"] as? String, "status")
+        XCTAssertEqual(v1Body?["arguments"] as? String, "--all", "arguments deve essere stringa (joined)")
+        XCTAssertEqual(v1Body?["model"] as? String, "claude-3", "il body v1 della command usa model = stringa (modelID), mai oggetto")
+        XCTAssertNil(v1Body?["modelID"], "la chiave del model v1 è 'model', non 'modelID'")
+        XCTAssertNil(v1Body?["messageID"], "request senza id: messageID non deve comparire nel body")
     }
 
     /// Se il server risponde JSON regolare (nessun HTML), viene usata UNA
