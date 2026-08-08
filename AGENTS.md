@@ -9,8 +9,8 @@ conventional `type(scope): subject` (es. `fix(api-v2): …`, `test(livee2e): …
 
 ```bash
 swift build                                    # build completo
-swift test                                     # 394 test unitari (ago 2026)
-swift test --filter Stress                     # suite stress (74 test, 3x verde)
+swift test                                     # 436 test unitari (verificati 8 ago 2026, ~8s a build fatta)
+swift test --filter Stress                     # suite stress (86 test, 3x verde)
 swift run MockServer --port 4199 --scenario burst50   # mock v1+v2+SSE+ws (--scenario delta50|burst50|burst1000|reconnect-test|error|permission-question; flag: --degraded, --count, --sse-state)
 swift run OpenCodeWidgets detect --host 127.0.0.1 --port 4199   # harness: detect/session-create/prompt/stream/revert/pty/health
 swift run LiveE2E --host 127.0.0.1 --port 4096  # E2E contro server REALE (27/27, exit≠0 se fail; --keep-sessions)
@@ -100,7 +100,7 @@ command). I fallback rilevano la risposta HTML della SPA (`HTMLFallbackError`).
 - Scenari SSE: `--scenario delta50|burst50|burst1000|reconnect-test|error|permission-question`
   (`permission-question` emette `permission.asked`/`question.asked` con i nomi evento REALI).
   `--degraded` è un FLAG separato (health → 503), NON uno scenario; `--count N` regola
-  il burst di `burst1000`; `--sse-state <file>` persistee stato SSE.
+  il burst di `burst1000`; `--sse-state <file>` persiste lo stato SSE.
 - **1 stream SSE per sessione**: mai testare stream in parallelo contro la
   stessa istanza/sessione (id SSE interleaved).
 - `performNoContent` del client v2 decodifica comunque il body → il mock deve
