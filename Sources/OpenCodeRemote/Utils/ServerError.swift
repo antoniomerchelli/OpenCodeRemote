@@ -88,7 +88,7 @@ public struct ServerError: Error, Equatable, Sendable, CustomStringConvertible {
     }
 
     public static func sessionNotFound(_ sessionID: String) -> ServerError {
-        ServerError(kind: .sessionNotFound, message: "Sessione non trovata: \(sessionID)")
+        ServerError(kind: .sessionNotFound, message: sessionID)
     }
 
     public static func timeout() -> ServerError {
@@ -117,8 +117,24 @@ public struct ServerError: Error, Equatable, Sendable, CustomStringConvertible {
         case .timeout: base = "Timeout"
         case .unknown: base = "Errore sconosciuto"
         }
-        if !message.isEmpty { base += ": \(message)" }
+        // Non riappendere il message quando è il testo standard della factory
+        // (altrimenti "Errore HTTP 500: Errore HTTP 500").
+        if !message.isEmpty, message != base, !isStandardMessage {
+            base += ": \(message)"
+        }
         return base
+    }
+
+    /// True se il message coincide col testo standard che le factory usano per
+    /// questo kind (e che quindi duplica già il base del description).
+    private var isStandardMessage: Bool {
+        switch kind {
+        case .transport: return message == "Errore di rete"
+        case .http: return message == "Errore HTTP \(statusCode ?? -1)"
+        case .cancelled: return message == "Richiesta annullata"
+        case .timeout: return message == "Richiesta scaduta"
+        default: return false
+        }
     }
 }
 
@@ -166,21 +182,25 @@ extension ServerError {
     /// `{ "message": "..." }` o il wire reale 1.18 `{ name, data: { message,
     /// kind } }`).
     public static func fromResponse(statusCode: Int, body: Data) -> ServerError {
+        // Message estratto dal body quando non c'è `_tag`/`name` riconosciuto:
+        // il wire reale 1.18 mette il dettaglio in `data.message`, non usarlo
+        // significherebbe mostrare solo "Errore HTTP <code>" all'utente.
+        var bodyMessage: String?
         if let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
-            let tag = json["_tag"] as? String
-            let message = (json["error"] as? String)
+            let tag = json["_tag"] as? String ?? json["name"] as? String
+            let dataDict = json["data"] as? [String: Any]
+            bodyMessage = (json["error"] as? String)
                 ?? (json["message"] as? String)
                 // Wire reale 1.18: `{"name": "...", "data": {"message": "...", "kind": "..."}}`.
-                ?? (json["data"] as? [String: Any])?["message"] as? String
-                ?? ""
+                ?? dataDict?["message"] as? String
 
             switch tag {
             case "SessionNotFoundError":
-                return .sessionNotFound(message)
+                return ServerError(kind: .sessionNotFound, statusCode: statusCode, message: bodyMessage ?? "")
             case "ConfigInvalidError":
-                return ServerError(kind: .configInvalid, statusCode: statusCode, message: message)
+                return ServerError(kind: .configInvalid, statusCode: statusCode, message: bodyMessage ?? "")
             case "ProviderModelNotFoundError":
-                return ServerError(kind: .providerModelNotFound, statusCode: statusCode, message: message)
+                return ServerError(kind: .providerModelNotFound, statusCode: statusCode, message: bodyMessage ?? "")
             default:
                 break
             }
@@ -195,6 +215,6 @@ extension ServerError {
         if statusCode == 401 || statusCode == 403 {
             return ServerError(kind: .authentication, statusCode: statusCode, message: "Errore HTTP \(statusCode)")
         }
-        return .api("Errore HTTP \(statusCode)", statusCode)
+        return ServerError(kind: .api, statusCode: statusCode, message: bodyMessage ?? "Errore HTTP \(statusCode)")
     }
 }

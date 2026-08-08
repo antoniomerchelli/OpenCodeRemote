@@ -250,7 +250,7 @@ public protocol SSEClient: Sendable {
 private struct ShellExecuteBody: Encodable, Sendable {
     let command: String
     let agent: String
-    let model: ModelRefV2?
+    let model: ModelRefV1Body?
 }
 
 /// Risposta di `POST /session/:id/shell` del server reale 1.18:
@@ -688,7 +688,7 @@ public actor V1OpenCodeAPIClient: OpenCodeAPIClient {
             model: request.modelId.map { modelID in
                 let parts = modelID.rawValue.split(separator: "/", maxSplits: 1)
                 let providerID = parts.count == 2 ? String(parts[0]) : modelID.rawValue
-                return ModelRefV2(providerID: providerID, modelID: modelID.rawValue)
+                return ModelRefV1Body(model: ModelRefV2(providerID: providerID, modelID: modelID.rawValue))
             }
         )
         let data = try encoder.encode(body)

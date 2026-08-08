@@ -19,7 +19,8 @@ public struct HistoryPageV2: Decodable, Equatable, Hashable, Sendable {
 
 /// Errore interno del client: il server ha risposto 2xx con body HTML
 /// (pagina SPA di fallback): la rotta v2 richiesta non esiste sul server.
-private enum HTMLFallbackError: Error {
+/// Pubblico per consentire a test/harness di diagnosticare il limite.
+public enum HTMLFallbackError: Error, Equatable {
     case htmlResponse(statusCode: Int)
 }
 
@@ -31,7 +32,7 @@ private enum HTMLFallbackError: Error {
 private struct V1ShellBody: Encodable, Equatable, Hashable, Sendable {
     let command: String
     let agent: String?
-    let model: ModelRefV2?
+    let model: ModelRefV1Body?
 }
 
 /// Risposta v1 di `POST /session/:id/shell`: `{ info: Message, parts: [...] }`.
@@ -251,7 +252,8 @@ public actor OpenCodeAPIClientV2 {
         path: String,
         query: [URLQueryItem]? = nil,
         body: (any Encodable)? = nil,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        emptyAsNil: Bool = false
     ) async throws -> T? {
         let request = try makeRequest(method, path: path, query: query, body: body, timeout: timeout)
         do {
@@ -266,6 +268,20 @@ public actor OpenCodeAPIClientV2 {
                 throw HTMLFallbackError.htmlResponse(statusCode: http.statusCode)
             }
             guard !data.isEmpty else { return nil }
+            // Endpoint "opzionali" (es. /api/session/active) che rispondono
+            // con un body VUOTO quando non c'è nulla: `[]`, `{}` oppure
+            // l'envelope reale `{"data":{}}`/`{"data":[]}` = assenza, non errore.
+            if emptyAsNil {
+                if let array = try? JSONSerialization.jsonObject(with: data) as? [Any] {
+                    if array.isEmpty { return nil }
+                } else if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if object.isEmpty { return nil }
+                    if object.count == 1, let nested = object["data"] {
+                        if let arr = nested as? [Any], arr.isEmpty { return nil }
+                        if let dict = nested as? [String: Any], dict.isEmpty { return nil }
+                    }
+                }
+            }
             return try Self.decodeLenient(T.self, from: data, decoder: decoder)
         } catch let error as HTMLFallbackError {
             throw error
@@ -357,9 +373,9 @@ public actor OpenCodeAPIClientV2 {
         return try await perform("GET", path: "/api/session", query: query)
     }
 
-    /// `GET /api/session/active` — sessione attiva.
+    /// `GET /api/session/active` — sessione attiva (array vuoto → nil).
     public func active() async throws -> SessionV2Info? {
-        try await performOptional("GET", path: "/api/session/active")
+        try await performOptional("GET", path: "/api/session/active", emptyAsNil: true)
     }
 
     /// `POST /api/session` — crea una nuova sessione.
@@ -583,7 +599,7 @@ public actor OpenCodeAPIClientV2 {
                 // Il server 1.18 richiede `agent` (400 `Missing key ["agent"]`):
                 // default `build` come nel client v1 (APIClient.executeShell).
                 agent: request.agent ?? "build",
-                model: request.model
+                model: request.model.map { ModelRefV1Body(model: $0) }
             )
             let response: V1ShellResponse? = try await performOptional("POST", path: "/session/\(id)/shell", body: body, timeout: turnTimeout)
             guard let info = response?.info else { return nil }

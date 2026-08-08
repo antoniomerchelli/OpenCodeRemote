@@ -29,6 +29,33 @@ public struct ModelRefV2: Codable, Equatable, Hashable, Sendable {
         self.modelID = modelID
         self.variant = variant
     }
+
+    // Wire reale 1.18 (verificato dal vivo): il campo del modello si chiama
+    // `id`, NON `modelID`. POST /api/session/:id/model con `modelID` → 400
+    // "Missing key [model][id]"; il body corretto è `{ model: { id, providerID } }`.
+    // ModelRefV2 è usato solo nelle struct Encodable di request (create/prompt/
+    // switch), mai in decodifica, quindi la CodingKey è sicura.
+    private enum CodingKeys: String, CodingKey {
+        case providerID
+        case modelID = "id"
+        case variant
+    }
+}
+
+/// Wrapper per i body **v1** che nel wire reale 1.18 richiedono la chiave
+/// `modelID` (es. `POST /session/:id/shell`: `{model: {providerID, modelID}}`;
+/// `id` → 400 `Missing key ["model"]["modelID"]`). Il v2 usa invece `id`
+/// (vedi `ModelRefV2`) — i due sistemi non sono compatibili sulla stessa chiave.
+public struct ModelRefV1Body: Encodable, Equatable, Hashable, Sendable {
+    public var providerID: String
+    public var modelID: String
+    public var variant: String?
+
+    public init(model: ModelRefV2) {
+        self.providerID = model.providerID
+        self.modelID = model.modelID
+        self.variant = model.variant
+    }
 }
 
 /// Delivery del prompt (`steer` | `queue`).
